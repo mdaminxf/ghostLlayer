@@ -1,12 +1,9 @@
 mod commands;
 mod db;
 mod sentinel;
-mod engines;
 
 use db::Database;
-use engines::sandbox::Sandbox;
-use engines::analyst::Analyst;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -20,17 +17,6 @@ pub fn run() {
             let db_path = app_dir.join("ghost_layer.db");
             let db = Arc::new(Database::new(db_path.to_str().unwrap()).expect("Failed to initialize database"));
             app.manage(db);
-            
-            // Initialize sandbox
-            let mut sandbox = Sandbox::new().expect("Failed to initialize sandbox");
-            if let Err(e) = sandbox.create_ephemeral_disk() {
-                eprintln!("Warning: Failed to create ephemeral disk: {}", e);
-            }
-            app.manage(Arc::new(Mutex::new(sandbox)));
-            
-            // Initialize analyst
-            let analyst = Analyst::new();
-            app.manage(Arc::new(Mutex::new(analyst)));
             
             // Create main dashboard window
             let _main_window = WebviewWindowBuilder::new(
@@ -80,10 +66,6 @@ pub fn run() {
             commands::remove_from_whitelist,
             commands::request_ai_explanation,
             commands::get_system_health,
-            commands::purge_ghost_layer,
-            commands::get_sandbox_status,
-            commands::mount_ghost_layer,
-            commands::get_ai_explanation,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

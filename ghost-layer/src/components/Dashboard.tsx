@@ -24,30 +24,20 @@ interface WhitelistEntry {
   added_at: string;
 }
 
-interface SandboxStatus {
-  is_active: boolean;
-  mount_point: string | null;
-  session_id: string;
-}
-
 function Dashboard() {
   const [logs, setLogs] = useState<EventLog[]>([]);
   const [health, setHealth] = useState<SystemHealth | null>(null);
   const [whitelist, setWhitelist] = useState<WhitelistEntry[]>([]);
   const [newProcess, setNewProcess] = useState("");
   const [apiKey, setApiKey] = useState("");
-  const [sandboxStatus, setSandboxStatus] = useState<SandboxStatus | null>(null);
-  const [isPurging, setIsPurging] = useState(false);
 
   useEffect(() => {
     loadLogs();
     loadHealth();
     loadWhitelist();
-    loadSandboxStatus();
 
     const interval = setInterval(() => {
       loadHealth();
-      loadSandboxStatus();
     }, 5000);
 
     const currentWindow = getCurrentWebviewWindow();
@@ -125,33 +115,6 @@ function Dashboard() {
     }
   };
 
-  const loadSandboxStatus = async () => {
-    try {
-      const result = await invoke<SandboxStatus>("get_sandbox_status");
-      setSandboxStatus(result);
-    } catch (error) {
-      console.error("Failed to load sandbox status:", error);
-    }
-  };
-
-  const purgeGhostLayer = async () => {
-    if (!confirm("⚠️ PURGE GHOST LAYER?\n\nThis will erase all session data and reset the sandbox. Continue?")) {
-      return;
-    }
-    
-    setIsPurging(true);
-    try {
-      const result = await invoke<string>("purge_ghost_layer");
-      alert(result);
-      loadSandboxStatus();
-    } catch (error) {
-      console.error("Failed to purge:", error);
-      alert("Failed to purge Ghost Layer: " + error);
-    } finally {
-      setIsPurging(false);
-    }
-  };
-
   const getSeverityColor = (severity: string) => {
     switch (severity.toUpperCase()) {
       case "CRITICAL":
@@ -168,26 +131,15 @@ function Dashboard() {
   return (
     <div className="min-h-screen bg-gray-900 text-gray-100 p-6">
       <header className="mb-8">
-        <div className="flex justify-between items-start">
-          <div>
-            <h1 className="text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-600">
-              Ghost Layer Security Console
-            </h1>
-            <p className="text-gray-400 mt-2">Industrial-grade threat detection and isolation</p>
-          </div>
-          <button
-            onClick={purgeGhostLayer}
-            disabled={isPurging}
-            className="bg-red-600 hover:bg-red-700 disabled:bg-gray-600 px-6 py-3 rounded-lg font-bold text-lg transition-colors"
-          >
-            {isPurging ? "PURGING..." : "🔥 PURGE GHOST LAYER"}
-          </button>
-        </div>
+        <h1 className="text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-600">
+          Ghost Layer Security Console
+        </h1>
+        <p className="text-gray-400 mt-2">Industrial-grade threat detection and isolation</p>
       </header>
 
       {/* System Health */}
       {health && (
-        <div className="grid grid-cols-5 gap-4 mb-8">
+        <div className="grid grid-cols-4 gap-4 mb-8">
           <div className="bg-gray-800 rounded-lg p-4 border border-gray-700">
             <div className="text-gray-400 text-sm">Processes</div>
             <div className="text-2xl font-bold">{health.total_processes}</div>
@@ -205,12 +157,6 @@ function Dashboard() {
           <div className="bg-gray-800 rounded-lg p-4 border border-gray-700">
             <div className="text-gray-400 text-sm">Threats Detected</div>
             <div className="text-2xl font-bold text-red-500">{logs.length}</div>
-          </div>
-          <div className={`rounded-lg p-4 border ${sandboxStatus?.is_active ? 'bg-green-900 border-green-700' : 'bg-gray-800 border-gray-700'}`}>
-            <div className="text-gray-400 text-sm">Sandbox</div>
-            <div className="text-2xl font-bold">
-              {sandboxStatus?.is_active ? '🛡️ ACTIVE' : '⚪ INACTIVE'}
-            </div>
           </div>
         </div>
       )}

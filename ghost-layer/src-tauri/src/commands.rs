@@ -1,8 +1,6 @@
 use crate::db::{Database, EventLog, WhitelistEntry};
-use crate::engines::sandbox::{Sandbox, SandboxStatus};
-use crate::engines::analyst::{Analyst, ThreatExplanation};
 use serde::{Deserialize, Serialize};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use sysinfo::{Pid, System};
 use tauri::State;
 
@@ -181,53 +179,4 @@ pub struct SystemHealth {
     pub cpu_usage: f64,
     pub memory_used_gb: f64,
     pub memory_total_gb: f64,
-}
-
-// ============================================================================
-// SANDBOX COMMANDS
-// ============================================================================
-
-#[tauri::command]
-pub async fn purge_ghost_layer(
-    sandbox: State<'_, Arc<Mutex<Sandbox>>>,
-) -> Result<String, String> {
-    let mut sandbox = sandbox.lock().map_err(|e| format!("Lock error: {}", e))?;
-    sandbox.purge_session()
-        .map_err(|e| format!("Failed to purge session: {}", e))?;
-    Ok("Ghost Layer purged successfully. All session data has been erased.".to_string())
-}
-
-#[tauri::command]
-pub async fn get_sandbox_status(
-    sandbox: State<'_, Arc<Mutex<Sandbox>>>,
-) -> Result<SandboxStatus, String> {
-    let sandbox = sandbox.lock().map_err(|e| format!("Lock error: {}", e))?;
-    Ok(sandbox.get_status())
-}
-
-#[tauri::command]
-pub async fn mount_ghost_layer(
-    sandbox: State<'_, Arc<Mutex<Sandbox>>>,
-) -> Result<String, String> {
-    let mut sandbox = sandbox.lock().map_err(|e| format!("Lock error: {}", e))?;
-    sandbox.mount_ghost_layer()
-        .map_err(|e| format!("Failed to mount: {}", e))
-}
-
-// ============================================================================
-// ANALYST COMMANDS
-// ============================================================================
-
-#[tauri::command]
-pub async fn get_ai_explanation(
-    analyst: State<'_, Arc<Mutex<Analyst>>>,
-    api_key: String,
-    log_text: String,
-) -> Result<ThreatExplanation, String> {
-    let mut analyst = analyst.lock().map_err(|e| format!("Lock error: {}", e))?;
-    analyst.set_api_key(api_key);
-    
-    analyst.explain_threat(log_text)
-        .await
-        .map_err(|e| format!("AI analysis failed: {}", e))
 }
