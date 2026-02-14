@@ -41,7 +41,7 @@ function Dashboard() {
   // here to put our api key
 
 
-  const [apiKey, setApiKey] = useState("AIzaSyB_EvpWx4SvLmEldiQOpFv33UiqiUUaIEM");
+  const [apiKey, setApiKey] = useState("");
 
 
 
