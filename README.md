@@ -68,3 +68,9 @@ npm run tauri build
 - No `unwrap()` calls in production code
 - Ghost pet is an inline SVG (no external assets)
 - Async/await for all I/O operations
+
+## Features 
+
+- AI Explain: Get user-friendly security insights via Google Gemini API
+- Add or remove any apps from the whitelist
+- Add your folder and files as trusted
