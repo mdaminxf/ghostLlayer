@@ -1,6 +1,7 @@
 mod commands;
 mod db;
 mod sentinel;
+mod whitelist;
 
 use db::Database;
 use std::sync::Arc;
@@ -66,6 +67,9 @@ pub fn run() {
             commands::remove_from_whitelist,
             commands::request_ai_explanation,
             commands::get_system_health,
+            commands::check_file_hash,
+            commands::add_trusted_app,
+            commands::get_trusted_apps,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

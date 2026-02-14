@@ -24,12 +24,29 @@ interface WhitelistEntry {
   added_at: string;
 }
 
+interface AiExplanation {
+  original_log: string;
+  explanation: string;
+  recommendations: string[];
+}
+
 function Dashboard() {
   const [logs, setLogs] = useState<EventLog[]>([]);
   const [health, setHealth] = useState<SystemHealth | null>(null);
   const [whitelist, setWhitelist] = useState<WhitelistEntry[]>([]);
   const [newProcess, setNewProcess] = useState("");
-  const [apiKey, setApiKey] = useState("");
+
+
+  
+  // here to put our api key
+
+
+  const [apiKey, setApiKey] = useState("AIzaSyB_EvpWx4SvLmEldiQOpFv33UiqiUUaIEM");
+
+
+
+  const [aiExplanation, setAiExplanation] = useState<AiExplanation | null>(null);
+  const [showAiModal, setShowAiModal] = useState(false);
 
   useEffect(() => {
     loadLogs();
@@ -109,9 +126,11 @@ function Dashboard() {
         apiKey,
         logText: JSON.stringify(log),
       });
-      alert(JSON.stringify(result, null, 2));
+      setAiExplanation(result as AiExplanation);
+      setShowAiModal(true);
     } catch (error) {
       console.error("Failed to get AI explanation:", error);
+      alert("Failed to get AI explanation. Check console for details.");
     }
   };
 
@@ -168,7 +187,7 @@ function Dashboard() {
           <div className="mb-4">
             <input
               type="password"
-              placeholder="Gemini API Key (for AI explanations)"
+              placeholder="Gemini API Key (pre-filled, optional)"
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
               className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm"
@@ -242,6 +261,50 @@ function Dashboard() {
           </div>
         </div>
       </div>
+
+      {/* AI Explanation Modal */}
+      {showAiModal && aiExplanation && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-gray-800 rounded-lg p-6 max-w-2xl max-h-[80vh] overflow-y-auto border border-gray-700">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-bold text-white">AI Threat Explanation</h3>
+              <button
+                onClick={() => setShowAiModal(false)}
+                className="text-gray-400 hover:text-white text-xl"
+              >
+                ×
+              </button>
+            </div>
+            
+            <div className="space-y-4">
+              <div>
+                <h4 className="font-semibold text-blue-400 mb-2">Original Log:</h4>
+                <pre className="bg-gray-900 p-3 rounded text-sm text-gray-300 overflow-x-auto">
+                  {aiExplanation.original_log}
+                </pre>
+              </div>
+              
+              <div>
+                <h4 className="font-semibold text-green-400 mb-2">AI Explanation:</h4>
+                <div className="bg-gray-900 p-3 rounded text-sm text-gray-300 whitespace-pre-wrap">
+                  {aiExplanation.explanation}
+                </div>
+              </div>
+              
+              <div>
+                <h4 className="font-semibold text-yellow-400 mb-2">Recommendations:</h4>
+                <ul className="list-disc list-inside space-y-1">
+                  {aiExplanation.recommendations.map((rec, index) => (
+                    <li key={index} className="text-sm text-gray-300">
+                      {rec}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

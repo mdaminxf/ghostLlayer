@@ -1,4 +1,5 @@
 use crate::db::{Database, EventLog, WhitelistEntry};
+use crate::whitelist::{WhitelistManager, FileStatus};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use sysinfo::{Pid, System};
@@ -120,20 +121,21 @@ pub async fn request_ai_explanation(
         }],
     };
     
-    let url = format!(
-        "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key={}",
-        api_key
-    );
+    let url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent";
     
     let response = client
-        .post(&url)
+        .post(url)
+        .header("x-goog-api-key", &api_key)
+        .header("Content-Type", "application/json")
         .json(&request_body)
         .send()
         .await
         .map_err(|e| format!("API request failed: {}", e))?;
     
     if !response.status().is_success() {
-        return Err(format!("API error: {}", response.status()));
+        let status = response.status();
+        let error_text = response.text().await.unwrap_or_else(|_| "Failed to read error response".to_string());
+        return Err(format!("API error {}: {}", status, error_text));
     }
     
     let gemini_response: GeminiResponse = response
@@ -179,4 +181,52 @@ pub struct SystemHealth {
     pub cpu_usage: f64,
     pub memory_used_gb: f64,
     pub memory_total_gb: f64,
+}
+
+#[tauri::command]
+pub async fn check_file_hash(file_path: String) -> Result<FileStatus, String> {
+    let config_path = "src-tauri/trusted_app.json";
+    let whitelist_manager = WhitelistManager::new(config_path)
+        .map_err(|e| format!("Failed to load whitelist: {}", e))?;
+    
+    whitelist_manager.check_file_status(&file_path)
+        .map_err(|e| format!("Failed to check file: {}", e))
+}
+
+#[tauri::command]
+pub async fn add_trusted_app(
+    name: String,
+    hash: String,
+    path: Option<String>,
+    description: Option<String>,
+) -> Result<String, String> {
+    use crate::whitelist::TrustedApp;
+    
+    let config_path = "src-tauri/trusted_app.json";
+    let mut whitelist_manager = WhitelistManager::new(config_path)
+        .map_err(|e| format!("Failed to load whitelist: {}", e))?;
+    
+    let trusted_app = TrustedApp {
+        name,
+        hash,
+        path,
+        description,
+    };
+    
+    whitelist_manager.add_trusted_app(trusted_app)
+        .map_err(|e| format!("Failed to add trusted app: {}", e))?;
+    
+    whitelist_manager.save_config(config_path)
+        .map_err(|e| format!("Failed to save whitelist: {}", e))?;
+    
+    Ok("Trusted app added successfully".to_string())
+}
+
+#[tauri::command]
+pub async fn get_trusted_apps() -> Result<Vec<crate::whitelist::TrustedApp>, String> {
+    let config_path = "src-tauri/trusted_app.json";
+    let whitelist_manager = WhitelistManager::new(config_path)
+        .map_err(|e| format!("Failed to load whitelist: {}", e))?;
+    
+    Ok(whitelist_manager.get_trusted_apps().to_vec())
 }
