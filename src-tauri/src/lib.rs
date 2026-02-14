@@ -3,6 +3,9 @@ mod db;
 mod sentinel;
 mod whitelist;
 
+#[cfg(test)]
+mod test_migration;
+
 use db::Database;
 use std::sync::Arc;
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
@@ -70,6 +73,9 @@ pub fn run() {
             commands::check_file_hash,
             commands::add_trusted_app,
             commands::get_trusted_apps,
+            commands::add_trusted_folder,
+            commands::get_trusted_folders,
+            commands::remove_trusted_folder,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

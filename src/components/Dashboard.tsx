@@ -88,8 +88,14 @@ function Dashboard() {
   };
 
   const loadWhitelist = async () => {
+    console.log("Loading whitelist...");
     try {
       const result = await invoke<WhitelistEntry[]>("get_whitelist");
+      console.log("Whitelist loaded:", result);
+      console.log("Number of whitelist entries:", result.length);
+      if (result.length > 0) {
+        console.log("First entry:", result[0]);
+      }
       setWhitelist(result);
     } catch (error) {
       console.error("Failed to load whitelist:", error);
@@ -97,22 +103,34 @@ function Dashboard() {
   };
 
   const addToWhitelist = async () => {
-    if (!newProcess.trim()) return;
+    console.log("addToWhitelist called, newProcess:", `"${newProcess}"`);
+    console.log("newProcess.trim() length:", newProcess.trim().length);
+    
+    if (!newProcess.trim()) {
+      console.log("Empty process name, skipping");
+      return;
+    }
+    console.log("Adding to whitelist:", newProcess);
     try {
-      await invoke("add_to_whitelist", { processName: newProcess });
+      const result = await invoke("add_to_whitelist", { processName: newProcess });
+      console.log("Add result:", result);
       setNewProcess("");
       loadWhitelist();
     } catch (error) {
       console.error("Failed to add to whitelist:", error);
+      alert(`Failed to add to whitelist: ${error}`);
     }
   };
 
-  const removeFromWhitelist = async (id: number) => {
+  const removeFromWhitelist = async (id: number, processName: string) => {
+    console.log("Removing from whitelist:", id, processName);
     try {
-      await invoke("remove_from_whitelist", { id });
+      const result = await invoke("remove_from_whitelist", { id, processName });
+      console.log("Remove result:", result);
       loadWhitelist();
     } catch (error) {
       console.error("Failed to remove from whitelist:", error);
+      alert(`Failed to remove from whitelist: ${error}`);
     }
   };
 
@@ -232,7 +250,10 @@ function Dashboard() {
               className="flex-1 bg-gray-700 border border-gray-600 rounded px-3 py-2"
             />
             <button
-              onClick={addToWhitelist}
+              onClick={() => {
+                console.log("Add button clicked!");
+                addToWhitelist();
+              }}
               className="bg-green-600 hover:bg-green-700 px-4 py-2 rounded font-medium"
             >
               Add
@@ -251,7 +272,10 @@ function Dashboard() {
                   </div>
                 </div>
                 <button
-                  onClick={() => entry.id && removeFromWhitelist(entry.id)}
+                  onClick={() => {
+                    console.log("Remove button clicked for:", entry.id, entry.process_name);
+                    entry.id && removeFromWhitelist(entry.id, entry.process_name);
+                  }}
                   className="text-red-400 hover:text-red-300 text-sm"
                 >
                   Remove
