@@ -1,4 +1,5 @@
 use crate::db::{Database, EventLog, WhitelistEntry};
+use crate::whitelist::{WhitelistManager, FileStatus};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use sysinfo::{Pid, System};
@@ -40,13 +41,96 @@ pub async fn add_to_whitelist(
     db: State<'_, Arc<Database>>,
     process_name: String,
 ) -> Result<String, String> {
+    println!("=== add_to_whitelist called with: {} ===", process_name);
+    
+    // Add to database first
     db.add_to_whitelist(&process_name)
         .map_err(|e| format!("Database error: {}", e))?;
-    Ok(format!("Added {} to whitelist", process_name))
+    
+    // Also add to trusted_app.json - use absolute path
+    let config_path = "trusted_app.json";
+    
+    // Try to calculate hash - if process_name is a file path, use it directly
+    // otherwise, try common paths for executables
+    let hash = if std::path::Path::new(&process_name).exists() {
+        match crate::whitelist::WhitelistManager::calculate_file_hash(&process_name) {
+            Ok(hash) => hash,
+            Err(e) => {
+                eprintln!("Warning: Could not calculate hash for {}: {}", process_name, e);
+                format!("PLACEHOLDER_{}", process_name.to_uppercase().replace(|c: char| !c.is_alphanumeric(), "_"))
+            }
+        }
+    } else {
+        // Try common executable paths
+        let common_paths = vec![
+            format!("C:\\Windows\\System32\\{}.exe", process_name),
+            format!("C:\\Windows\\{}.exe", process_name),
+            format!("C:\\Program Files\\{}\\{}.exe", process_name, process_name),
+            format!("C:\\Program Files (x86)\\{}\\{}.exe", process_name, process_name),
+        ];
+        
+        let mut last_error = None;
+        for path in common_paths {
+            if std::path::Path::new(&path).exists() {
+                match crate::whitelist::WhitelistManager::calculate_file_hash(&path) {
+                    Ok(hash) => {
+                        // Found real hash, use it
+                        let mut whitelist_manager = crate::whitelist::WhitelistManager::new(config_path)
+                            .map_err(|e| format!("Failed to load whitelist: {}", e))?;
+                        
+                        let trusted_app = crate::whitelist::TrustedApp {
+                            name: process_name.clone(),
+                            hash,
+                            path: Some(path),
+                            description: Some(format!("User-added trusted application: {}", process_name)),
+                            app_type: crate::whitelist::AppType::Application,
+                        };
+                        
+                        whitelist_manager.add_trusted_app(trusted_app)
+                            .map_err(|e| format!("Failed to add trusted app: {}", e))?;
+                        
+                        whitelist_manager.save_config(config_path)
+                            .map_err(|e| format!("Failed to save whitelist: {}", e))?;
+                        
+                        return Ok(format!("Added {} to whitelist and trusted apps", process_name));
+                    }
+                    Err(e) => last_error = Some(e),
+                }
+            }
+        }
+        
+        // If no file found, use placeholder hash
+        if let Some(e) = last_error {
+            eprintln!("Warning: Could not find executable for {}: {}", process_name, e);
+        }
+        format!("PLACEHOLDER_{}", process_name.to_uppercase().replace(|c: char| !c.is_alphanumeric(), "_"))
+    };
+    
+    // Always add to trusted_app.json
+    let mut whitelist_manager = crate::whitelist::WhitelistManager::new(config_path)
+        .map_err(|e| format!("Failed to load whitelist: {}", e))?;
+    
+    let trusted_app = crate::whitelist::TrustedApp {
+            name: process_name.clone(),
+            hash,
+            path: Some(format!("{}.exe", process_name)),
+            description: Some(format!("User-added trusted application: {}", process_name)),
+            app_type: crate::whitelist::AppType::Application,
+        };
+    
+    whitelist_manager.add_trusted_app(trusted_app)
+        .map_err(|e| format!("Failed to add trusted app: {}", e))?;
+    
+    whitelist_manager.save_config(config_path)
+        .map_err(|e| format!("Failed to save whitelist: {}", e))?;
+    
+    Ok(format!("Added {} to whitelist and trusted apps", process_name))
 }
 
 #[tauri::command]
 pub async fn get_whitelist(db: State<'_, Arc<Database>>) -> Result<Vec<WhitelistEntry>, String> {
+    println!("=== get_whitelist called ===");
+    
     db.get_whitelist()
         .map_err(|e| format!("Database error: {}", e))
 }
@@ -55,10 +139,35 @@ pub async fn get_whitelist(db: State<'_, Arc<Database>>) -> Result<Vec<Whitelist
 pub async fn remove_from_whitelist(
     db: State<'_, Arc<Database>>,
     id: i64,
+    process_name: Option<String>,
 ) -> Result<String, String> {
+    println!("=== remove_from_whitelist called with id: {}, process_name: {:?} ===", id, process_name);
+    
+    // Remove from database
     db.remove_from_whitelist(id)
         .map_err(|e| format!("Database error: {}", e))?;
-    Ok("Removed from whitelist".to_string())
+    
+    // If process_name is provided, also try to remove from trusted apps
+    if let Some(name) = process_name {
+        let config_path = "trusted_app.json";
+        let mut whitelist_manager = crate::whitelist::WhitelistManager::new(config_path)
+            .map_err(|e| format!("Failed to load whitelist: {}", e))?;
+        
+        // Remove the trusted app by name
+        let removed = whitelist_manager.remove_trusted_app_by_name(&name)
+            .map_err(|e| format!("Failed to remove trusted app: {}", e))?;
+        
+        if removed {
+            whitelist_manager.save_config(config_path)
+                .map_err(|e| format!("Failed to save whitelist: {}", e))?;
+            
+            Ok(format!("Removed {} from whitelist and trusted apps", name))
+        } else {
+            Ok(format!("Removed {} from whitelist (not found in trusted apps)", name))
+        }
+    } else {
+        Ok("Removed from whitelist".to_string())
+    }
 }
 
 #[tauri::command]
@@ -120,20 +229,21 @@ pub async fn request_ai_explanation(
         }],
     };
     
-    let url = format!(
-        "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key={}",
-        api_key
-    );
+    let url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent";
     
     let response = client
-        .post(&url)
+        .post(url)
+        .header("x-goog-api-key", &api_key)
+        .header("Content-Type", "application/json")
         .json(&request_body)
         .send()
         .await
         .map_err(|e| format!("API request failed: {}", e))?;
     
     if !response.status().is_success() {
-        return Err(format!("API error: {}", response.status()));
+        let status = response.status();
+        let error_text = response.text().await.unwrap_or_else(|_| "Failed to read error response".to_string());
+        return Err(format!("API error {}: {}", status, error_text));
     }
     
     let gemini_response: GeminiResponse = response
@@ -179,4 +289,95 @@ pub struct SystemHealth {
     pub cpu_usage: f64,
     pub memory_used_gb: f64,
     pub memory_total_gb: f64,
+}
+
+#[tauri::command]
+pub async fn check_file_hash(file_path: String) -> Result<FileStatus, String> {
+    let config_path = "src-tauri/trusted_app.json";
+    let whitelist_manager = WhitelistManager::new(config_path)
+        .map_err(|e| format!("Failed to load whitelist: {}", e))?;
+    
+    whitelist_manager.check_file_status(&file_path)
+        .map_err(|e| format!("Failed to check file: {}", e))
+}
+
+#[tauri::command]
+pub async fn add_trusted_app(
+    name: String,
+    hash: String,
+    path: Option<String>,
+    description: Option<String>,
+) -> Result<String, String> {
+    use crate::whitelist::{TrustedApp, AppType};
+    
+    let config_path = "trusted_app.json";
+    let mut whitelist_manager = crate::whitelist::WhitelistManager::new(config_path)
+        .map_err(|e| format!("Failed to load whitelist: {}", e))?;
+    
+    let trusted_app = TrustedApp {
+        name,
+        hash,
+        path,
+        description,
+        app_type: AppType::Application,
+    };
+    
+    whitelist_manager.add_trusted_app(trusted_app)
+        .map_err(|e| format!("Failed to add trusted app: {}", e))?;
+    
+    whitelist_manager.save_config(config_path)
+        .map_err(|e| format!("Failed to save whitelist: {}", e))?;
+    
+    Ok("Trusted app added successfully".to_string())
+}
+
+#[tauri::command]
+pub async fn add_trusted_folder(folder_path: String) -> Result<String, String> {
+    let config_path = "trusted_app.json";
+    let mut whitelist_manager = crate::whitelist::WhitelistManager::new(config_path)
+        .map_err(|e| format!("Failed to load whitelist: {}", e))?;
+    
+    whitelist_manager.add_trusted_folder(folder_path.clone())
+        .map_err(|e| format!("Failed to add trusted folder: {}", e))?;
+    
+    whitelist_manager.save_config(config_path)
+        .map_err(|e| format!("Failed to save whitelist: {}", e))?;
+    
+    Ok(format!("Added {} to trusted folders", folder_path))
+}
+
+#[tauri::command]
+pub async fn get_trusted_folders() -> Result<Vec<String>, String> {
+    let config_path = "trusted_app.json";
+    let whitelist_manager = crate::whitelist::WhitelistManager::new(config_path)
+        .map_err(|e| format!("Failed to load whitelist: {}", e))?;
+    
+    Ok(whitelist_manager.get_trusted_folders().to_vec())
+}
+
+#[tauri::command]
+pub async fn remove_trusted_folder(folder_path: String) -> Result<String, String> {
+    let config_path = "trusted_app.json";
+    let mut whitelist_manager = crate::whitelist::WhitelistManager::new(config_path)
+        .map_err(|e| format!("Failed to load whitelist: {}", e))?;
+    
+    let removed = whitelist_manager.remove_trusted_folder(&folder_path);
+    
+    if removed {
+        whitelist_manager.save_config(config_path)
+            .map_err(|e| format!("Failed to save whitelist: {}", e))?;
+        
+        Ok(format!("Removed {} from trusted folders", folder_path))
+    } else {
+        Ok(format!("Folder {} not found in trusted folders", folder_path))
+    }
+}
+
+#[tauri::command]
+pub async fn get_trusted_apps() -> Result<Vec<crate::whitelist::TrustedApp>, String> {
+    let config_path = "trusted_app.json";
+    let whitelist_manager = crate::whitelist::WhitelistManager::new(config_path)
+        .map_err(|e| format!("Failed to load whitelist: {}", e))?;
+    
+    Ok(whitelist_manager.get_trusted_apps().to_vec())
 }
