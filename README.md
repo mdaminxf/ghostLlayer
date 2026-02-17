@@ -69,8 +69,10 @@ npm run tauri build
 - Ghost pet is an inline SVG (no external assets)
 - Async/await for all I/O operations
 
-## Features 
+## Features Added
 
 - AI Explain: Get user-friendly security insights via Google Gemini API
 - Add or remove any apps from the whitelist
 - Add your folder and files as trusted
+- Added engines folder for future engine implementations
+- used mod.rs , rce_detector.rs for remote code execution detection
