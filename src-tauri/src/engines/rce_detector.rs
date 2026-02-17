@@ -145,15 +145,24 @@ impl RceDetector {
     async fn check_rce_exploit(&self, process_info: &ProcessInfo, sys: &System) -> Option<RceAlert> {
         let child_name = process_info.name.to_lowercase();
         
+        // Step 1: Identity Check - Is this a trusted process starting normally?
+        if self.is_trusted_process_start(&child_name, process_info.parent_pid, sys) {
+            return None; // This is a legitimate process start
+        }
+        
+        // Step 2: The "Rebellious Child" Check
+        // Monitor: Watch every new process
+        // Identify Parent: "Who started this process?"
+        
         // Is the child a system shell?
         if !self.system_shells.iter().any(|shell| child_name.contains(shell)) {
-            return None;
+            return None; // Not a system shell, not our concern
         }
 
         // Check if we have a parent process
         let parent_pid = match process_info.parent_pid {
             Some(pid) => pid,
-            None => return None,
+            None => return None, // No parent = can't determine if exploit
         };
 
         let parent_process = match sys.process(Pid::from_u32(parent_pid)) {
@@ -163,16 +172,21 @@ impl RceDetector {
 
         let parent_name = parent_process.name().to_string_lossy().to_lowercase();
         
-        // Is the parent a trusted browser or document reader?
-        let is_trusted_parent = self.trusted_browsers.iter().any(|browser| parent_name.contains(browser)) ||
-                               self.trusted_document_readers.iter().any(|reader| parent_name.contains(reader));
+        // The Logic Trap: Is the Parent a "Document Reader" or "Browser"?
+        let is_suspicious_parent = self.trusted_browsers.iter().any(|browser| parent_name.contains(browser)) ||
+                                   self.trusted_document_readers.iter().any(|reader| parent_name.contains(reader));
 
-        if !is_trusted_parent {
-            return None;
+        if !is_suspicious_parent {
+            return None; // Parent is not a browser/doc reader, not the classic RCE pattern
         }
 
-        // This is an RCE exploit!
-        Some(RceAlert {
+        // Additional check: Is this parent process already compromised?
+        if self.is_process_compromised(&parent_name, parent_pid) {
+            return None; // Already known to be compromised, this is expected behavior
+        }
+
+        // MATCH: This is an RCE Exploit!
+        let alert = RceAlert {
             alert_type: "RCE_EXPLOIT".to_string(),
             parent_process: parent_process.name().to_string_lossy().to_string(),
             parent_pid,
@@ -180,14 +194,69 @@ impl RceDetector {
             child_pid: process_info.pid,
             timestamp: Utc::now().to_rfc3339(),
             explanation: format!(
-                "{} was hijacked and tried to open {} (PID: {}). This is a classic Remote Code Execution attack pattern.",
-                parent_process.name().to_string_lossy(),
+                "IDENTITY CHECK: {} is not a trusted system process.\nREBELLIOUS CHILD CHECK: {} (PID: {}) was started by {} (PID: {}).\nLOGIC TRAP: {} is a trusted application that should NOT be spawning system shells.\nVERDICT: This is a Remote Code Execution exploit attempt!",
                 process_info.name,
-                process_info.pid
+                process_info.name,
+                process_info.pid,
+                parent_process.name().to_string_lossy(),
+                parent_pid,
+                parent_process.name().to_string_lossy()
             ),
-            action_taken: "Child process terminated, parent process frozen".to_string(),
+            action_taken: "Child process terminated, parent process frozen and marked as compromised".to_string(),
             severity: "CRITICAL".to_string(),
-        })
+        };
+        
+        Some(alert)
+    }
+    
+    fn is_trusted_process_start(&self, child_name: &str, parent_pid: Option<u32>, sys: &System) -> bool {
+        // If the child is not a system shell, it's probably legitimate
+        if !self.system_shells.iter().any(|shell| child_name.contains(shell)) {
+            return true;
+        }
+        
+        // Check if parent is a legitimate launcher for system shells
+        let parent_pid = match parent_pid {
+            Some(pid) => pid,
+            None => return false,
+        };
+        
+        let parent_process = match sys.process(Pid::from_u32(parent_pid)) {
+            Some(p) => p,
+            None => return false,
+        };
+        
+        let parent_name = parent_process.name().to_string_lossy().to_lowercase();
+        
+        // These are legitimate ways to start system shells
+        let legitimate_launchers = vec![
+            "explorer.exe",      // User opening terminal from Explorer
+            "winlogon.exe",      // System processes
+            "services.exe",      // System services
+            "svchost.exe",       // Service host
+            "taskmgr.exe",       // Task Manager
+            "powershell_ise.exe", // PowerShell ISE
+            "windowsterminal.exe", // Windows Terminal
+            "wt.exe",            // Windows Terminal shortcut
+            "conhost.exe",       // Console host
+        ];
+        
+        // If parent is a legitimate launcher, allow it
+        if legitimate_launchers.iter().any(|launcher| parent_name.contains(launcher)) {
+            return true;
+        }
+        
+        false
+    }
+    
+    fn is_process_compromised(&self, _process_name: &str, _pid: u32) -> bool {
+        // In a real implementation, you'd check against a database of compromised processes
+        // For now, we'll use a simple heuristic - if we've seen this process exploit before
+        // This could be enhanced with process signature verification, behavior analysis, etc.
+        
+        // Check if this specific PID was previously flagged
+        // In production, you'd maintain a list of compromised process PIDs/signatures
+        false // For now, assume no process is pre-compromised
     }
 
     async fn handle_rce_exploit(&self, alert: &RceAlert, app_handle: &Arc<AppHandle>) {
@@ -277,25 +346,32 @@ impl RceDetector {
         let client = reqwest::Client::new();
         
         let prompt = format!(
-            "You are a cybersecurity expert. Explain this RCE (Remote Code Execution) alert to a non-technical user:\n\n\
-            Alert Details:\n\
-            - Type: {}\n\
-            - Parent Process: {} (PID: {})\n\
-            - Child Process: {} (PID: {})\n\
-            - Explanation: {}\n\
-            - Severity: {}\n\n\
-            Provide:\n\
-            1. What happened in simple terms\n\
-            2. Why this is dangerous\n\
-            3. What the user should do next\n\n\
-            Respond in JSON format with fields: explanation (string), recommendations (array of 3 strings)",
-            alert.alert_type,
+            "You are a cybersecurity expert analyzing a Remote Code Execution (RCE) attack attempt. \
+            Explain this critical security alert to a non-technical user in a clear, urgent, but not panic-inducing manner.\n\n\
+            ALERT DETAILS:\n\
+            Attack Type: Remote Code Execution (RCE) Exploit\n\
+            Hijacked Application: {} (PID: {})\n\
+            Malicious Action: Started {} (PID: {})\n\
+            Time: {}\n\
+            Severity: CRITICAL\n\n\
+            TECHNICAL ANALYSIS:\n\
+            {}\n\n\
+            Provide your response in this exact JSON format:\n\
+            {{\n\
+              \"explanation\": \"Clear explanation of what happened in simple terms, emphasizing the danger but avoiding panic\",\n\
+              \"recommendations\": [\n\
+                \"Immediate action the user should take\",\n\
+                \"Follow-up security measure to implement\",\n\
+                \"Prevention tip for the future\"\n\
+              ]\n\
+            }}\n\n\
+            Make the explanation urgent but actionable. Focus on what the user needs to do RIGHT NOW.",
             alert.parent_process,
             alert.parent_pid,
             alert.child_process,
             alert.child_pid,
-            alert.explanation,
-            alert.severity
+            alert.timestamp,
+            alert.explanation
         );
 
         #[derive(Serialize)]

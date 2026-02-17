@@ -43,6 +43,8 @@ function Dashboard() {
 
   const [aiExplanation, setAiExplanation] = useState<AiExplanation | null>(null);
   const [showAiModal, setShowAiModal] = useState(false);
+  const [showRceAlert, setShowRceAlert] = useState(false);
+  const [currentRceAlert, setCurrentRceAlert] = useState<EventLog | null>(null);
 
   useEffect(() => {
     loadLogs();
@@ -57,6 +59,19 @@ function Dashboard() {
     const unlisten = currentWindow.listen("threat-alert", (event: any) => {
       const alert = event.payload;
       setLogs((prev) => [alert, ...prev]);
+      
+      // Check if this is an RCE alert and show immediate notification
+      if (alert.threat_type && alert.threat_type.toLowerCase().includes('rce')) {
+        setCurrentRceAlert(alert);
+        setShowRceAlert(true);
+        
+        // Auto-play alert sound (if available)
+        const audio = new Audio('/alert.mp3');
+        audio.play().catch(() => {
+          // Ignore if audio file doesn't exist or can't play
+          console.log('Alert sound not available');
+        });
+      }
     });
 
     return () => {
@@ -337,6 +352,63 @@ function Dashboard() {
           </div>
         </div>
       </div>
+
+      {/* RCE Alert Modal */}
+      {showRceAlert && currentRceAlert && (
+        <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
+          <div className="bg-red-900 border-2 border-red-500 rounded-lg p-6 max-w-lg mx-4 shadow-2xl animate-pulse">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-12 h-12 bg-red-500 rounded-full flex items-center justify-center">
+                <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                </svg>
+              </div>
+              <div>
+                <h3 className="text-2xl font-bold text-white">RCE ATTACK DETECTED!</h3>
+                <p className="text-red-200 text-sm">Remote Code Execution Attempt Blocked</p>
+              </div>
+            </div>
+            
+            <div className="bg-black bg-opacity-50 rounded p-4 mb-4">
+              <div className="text-sm text-red-200 mb-2">
+                <span className="font-semibold text-white">Hijacked Application:</span> {currentRceAlert.target}
+              </div>
+              <div className="text-sm text-red-200 mb-2">
+                <span className="font-semibold text-white">Time:</span> {new Date(currentRceAlert.timestamp).toLocaleString()}
+              </div>
+              <div className="text-sm text-red-200">
+                <span className="font-semibold text-white">Severity:</span> 
+                <span className="ml-2 text-red-400 font-bold animate-pulse">CRITICAL</span>
+              </div>
+            </div>
+            
+            <div className="bg-yellow-900 bg-opacity-50 border border-yellow-600 rounded p-3 mb-4">
+              <p className="text-yellow-200 text-sm">
+                <strong>IMMEDIATE ACTION REQUIRED:</strong> A trusted application was hijacked to execute malicious commands. 
+                The attack has been blocked, but your system may be compromised.
+              </p>
+            </div>
+            
+            <div className="flex gap-3">
+              <button
+                onClick={() => {
+                  setShowRceAlert(false);
+                  explainThreat(currentRceAlert);
+                }}
+                className="flex-1 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded font-medium transition-colors"
+              >
+                View AI Analysis
+              </button>
+              <button
+                onClick={() => setShowRceAlert(false)}
+                className="flex-1 bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded font-medium transition-colors"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* AI Explanation Modal */}
       {showAiModal && aiExplanation && (

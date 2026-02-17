@@ -5,4 +5,4 @@ pub mod sandbox;
 pub mod input;
 pub mod whitelist;
 
-pub use rce_detector::{RceDetector, start_rce_detection_with_db};
+pub use rce_detector::start_rce_detection_with_db;
