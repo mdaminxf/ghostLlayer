@@ -1,5 +1,6 @@
 use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::mpsc::channel;
 use std::time::Duration;
@@ -95,20 +96,29 @@ pub async fn start_file_watcher(app_handle: AppHandle) -> Result<(), Box<dyn std
     Ok(())
 }
 
-/// Monitor running processes for suspicious behavior
+/// Monitor running processes for suspicious behavior with enhanced parent-child tracking
 pub async fn start_process_monitor(app_handle: AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     tokio::spawn(async move {
         let mut sys = System::new_all();
+        let mut known_processes: HashMap<u32, String> = HashMap::new();
         
         loop {
             sys.refresh_all();
             
+            // Track new processes and their parents
             for (pid, process) in sys.processes() {
+                let pid_u32 = pid.as_u32();
                 let name = process.name().to_string_lossy().to_lowercase();
+                
+                // Skip if already tracked
+                if known_processes.contains_key(&pid_u32) {
+                    continue;
+                }
                 
                 // Whitelist legitimate Windows processes
                 let whitelist = ["msfeedssync.exe", "svchost.exe", "explorer.exe", "system"];
                 if whitelist.iter().any(|&safe| name.contains(safe)) {
+                    known_processes.insert(pid_u32, name);
                     continue;
                 }
                 
@@ -131,9 +141,12 @@ pub async fn start_process_monitor(app_handle: AppHandle) -> Result<(), Box<dyn 
                     let _ = app_handle.emit("threat-alert", &alert);
                     println!("Emitted threat-alert: {:?}", alert);
                 }
+                
+                // Track the process
+                known_processes.insert(pid_u32, name);
             }
             
-            tokio::time::sleep(Duration::from_secs(5)).await;
+            tokio::time::sleep(Duration::from_secs(2)).await;
         }
     });
     
