@@ -183,6 +183,7 @@ impl WhitelistManager {
     }
     
     /// Check if a file is trusted (either by hash or folder)
+    #[allow(dead_code)]
     pub fn is_file_trusted(&self, file_path: &str) -> Result<bool> {
         // First check if file is in trusted folder
         if self.is_in_trusted_folder(file_path) {

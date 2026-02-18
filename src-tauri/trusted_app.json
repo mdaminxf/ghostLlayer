@@ -76,6 +76,13 @@
       "path": "Brave.exe.exe",
       "description": "User-added trusted application: Brave.exe",
       "app_type": "Application"
+    },
+    {
+      "name": "Chrome.exe",
+      "hash": "PLACEHOLDER_CHROME_EXE",
+      "path": "Chrome.exe.exe",
+      "description": "User-added trusted application: Chrome.exe",
+      "app_type": "Application"
     }
   ],
   "trusted_folders": [

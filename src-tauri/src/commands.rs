@@ -172,9 +172,9 @@ pub async fn remove_from_whitelist(
 
 #[tauri::command]
 pub async fn request_ai_explanation(
-    api_key: String,
     log_text: String,
 ) -> Result<AiExplanation, String> {
+    let api_key = "AIzaSyBcn5dMC7YjpiX2ulpeErCWyOgXf7-KfZk";
     let client = reqwest::Client::new();
     
     let prompt = format!(
@@ -229,16 +229,16 @@ pub async fn request_ai_explanation(
         }],
     };
     
-    let url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent";
+    let url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent";
     
     let response = client
         .post(url)
-        .header("x-goog-api-key", &api_key)
+        .header("x-goog-api-key", api_key)
         .header("Content-Type", "application/json")
         .json(&request_body)
         .send()
         .await
-        .map_err(|e| format!("API request failed: {}", e))?;
+        .map_err(|e| format!("API request failed: {}. Check your internet connection and API key.", e))?;
     
     if !response.status().is_success() {
         let status = response.status();
@@ -263,8 +263,8 @@ pub async fn request_ai_explanation(
         original_log: log_text,
         explanation: ai_text.clone(),
         recommendations: vec![
-            "Keep your antivirus updated".to_string(),
-            "Avoid downloading files from untrusted sources".to_string(),
+            "Run a full antivirus scan immediately".to_string(),
+            "Review your browser extensions and remove suspicious ones".to_string(),
             "Enable Windows Defender real-time protection".to_string(),
         ],
     })

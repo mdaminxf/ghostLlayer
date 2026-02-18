@@ -2,6 +2,7 @@ mod commands;
 mod db;
 mod sentinel;
 mod whitelist;
+mod engines;
 
 #[cfg(test)]
 mod test_migration;
@@ -57,6 +58,12 @@ pub fn run() {
                 }
                 if let Err(e) = sentinel::start_process_monitor(app_handle.clone()).await {
                     eprintln!("Process monitor error: {}", e);
+                }
+                // Note: We need to get the database from the app state since we can't capture it directly
+                // For now, we'll create a new database connection - this should be optimized in production
+                let db = Arc::new(Database::new("ghost_layer.db").expect("Failed to initialize database"));
+                if let Err(e) = engines::start_rce_detection_with_db(app_handle.clone(), db).await {
+                    eprintln!("RCE detection error: {}", e);
                 }
             });
             

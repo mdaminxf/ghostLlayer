@@ -19,6 +19,7 @@ pub struct EventLog {
     pub entropy: Option<f64>,
 }
 
+#[derive(Debug)]
 pub struct Database {
     conn: Mutex<Connection>,
 }
@@ -83,6 +84,8 @@ impl Database {
         Ok(())
     }
     
+    /// Log a security event to the database
+    #[allow(dead_code)]
     pub fn log_event(&self, event: &EventLog) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
