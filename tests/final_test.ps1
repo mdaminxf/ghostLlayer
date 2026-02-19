@@ -1,5 +1,5 @@
 # Final Test - Create direct threat alerts
-Write-Host "🔥 FINAL GHOST LAYER TEST" -ForegroundColor Red
+Write-Host "FINAL GHOST LAYER TEST" -ForegroundColor Red
 Write-Host "This will create visible alerts in the dashboard" -ForegroundColor Yellow
 
 # Test 1: Create suspicious process activity
@@ -24,7 +24,7 @@ Write-Host "`n[TEST] Rapid process creation test..." -ForegroundColor Green
     Start-Sleep -Milliseconds 500
 }
 
-Write-Host "`n✅ TEST COMPLETE!" -ForegroundColor Green
+Write-Host "\nTEST COMPLETE!" -ForegroundColor Green
 Write-Host "Check Ghost Layer dashboard at http://localhost:1420" -ForegroundColor Yellow
 Write-Host "You should see threat alerts in the Threat Logs section" -ForegroundColor White
 

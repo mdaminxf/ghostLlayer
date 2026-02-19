@@ -22,16 +22,16 @@ echo.
 
 echo [5] Checking Sandbox Infrastructure...
 if exist "%TEMP%\ghost_layer_sandbox" (
-    echo ✓ Sandbox directory exists
+    echo Sandbox directory exists
     echo   Location: %TEMP%\ghost_layer_sandbox
     dir "%TEMP%\ghost_layer_sandbox" /b 2>nul
     if errorlevel 1 (
         echo   (No active sandboxes yet)
     )
 ) else (
-    echo ✗ Sandbox directory not found - creating...
+    echo Sandbox directory not found - creating...
     mkdir "%TEMP%\ghost_layer_sandbox" 2>nul
-    echo ✓ Created sandbox directory
+    echo Created sandbox directory
 )
 
 echo.
@@ -41,7 +41,7 @@ mkdir "%TEMP%\ghost_layer_sandbox\test_sandbox\virtual_fs\1234" 2>nul
 mkdir "%TEMP%\ghost_layer_sandbox\test_sandbox\virtual_fs\1234\Documents" 2>nul
 mkdir "%TEMP%\ghost_layer_sandbox\test_sandbox\virtual_fs\1234\Downloads" 2>nul
 mkdir "%TEMP%\ghost_layer_sandbox\test_sandbox\virtual_fs\1234\Desktop" 2>nul
-echo ✓ Virtual filesystem structure created
+echo Virtual filesystem structure created
 
 echo.
 echo [7] System Health Check...
@@ -60,15 +60,15 @@ echo   3. Identify RCE pattern
 echo   4. Initiate sandbox migration
 echo   5. Preserve user experience
 echo   6. Generate AI explanation
-echo ✓ Workflow simulation complete
+echo Workflow simulation complete
 
 echo.
 echo [9] Integration Test Results...
-echo ✅ Sandbox system: READY
-echo ✅ RCE detection: READY  
-echo ✅ Migration logic: READY
-echo ✅ User experience: PRESERVED
-echo ✅ Virtual filesystem: FUNCTIONAL
+echo Sandbox system: READY
+echo RCE detection: READY  
+echo Migration logic: READY
+echo User experience: PRESERVED
+echo Virtual filesystem: FUNCTIONAL
 
 echo.
 echo ========================================

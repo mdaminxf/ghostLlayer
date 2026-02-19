@@ -1,5 +1,5 @@
 # Simple Threat Test - Create processes that Ghost Layer should detect
-Write-Host "🔥 SIMPLE THREAT TEST" -ForegroundColor Red
+Write-Host "SIMPLE THREAT TEST" -ForegroundColor Red
 Write-Host "Creating suspicious PowerShell processes..." -ForegroundColor Yellow
 
 # Create multiple PowerShell processes that should trigger alerts
@@ -9,6 +9,6 @@ Write-Host "Creating suspicious PowerShell processes..." -ForegroundColor Yellow
     Start-Sleep -Milliseconds 500
 }
 
-Write-Host "✅ Test complete!" -ForegroundColor Green
+Write-Host "Test complete!" -ForegroundColor Green
 Write-Host "Check Ghost Layer dashboard at http://localhost:1420" -ForegroundColor Cyan
 Write-Host "You should see threat alerts in the Threat Logs section" -ForegroundColor White

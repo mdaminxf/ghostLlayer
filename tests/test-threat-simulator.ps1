@@ -16,7 +16,7 @@ $rng.GetBytes($randomBytes)
 $highEntropyFile = "C:\Ghost_Secrets\suspicious_encrypted.bin"
 [System.IO.File]::WriteAllBytes($highEntropyFile, $randomBytes)
 
-Write-Host "✓ Created: $highEntropyFile" -ForegroundColor Green
+Write-Host "Created: $highEntropyFile" -ForegroundColor Green
 Write-Host "  Entropy: ~8.0 (very high - typical of encryption)" -ForegroundColor Gray
 Write-Host ""
 
@@ -28,7 +28,7 @@ Write-Host "[TEST 2] Creating file with suspicious name..." -ForegroundColor Yel
 $suspiciousFile = "C:\Ghost_Secrets\mimikatz_dump.txt"
 "This is a test file with a suspicious name" | Out-File -FilePath $suspiciousFile -Encoding ASCII
 
-Write-Host "✓ Created: $suspiciousFile" -ForegroundColor Green
+Write-Host "Created: $suspiciousFile" -ForegroundColor Green
 Write-Host ""
 
 Start-Sleep -Seconds 2
@@ -40,7 +40,7 @@ $base64Data = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes("T
 $base64File = "C:\Ghost_Secrets\encoded_payload.b64"
 $base64Data | Out-File -FilePath $base64File -Encoding ASCII
 
-Write-Host "✓ Created: $base64File" -ForegroundColor Green
+Write-Host "Created: $base64File" -ForegroundColor Green
 Write-Host "  Entropy: ~6.5 (medium-high)" -ForegroundColor Gray
 Write-Host ""
 
@@ -63,7 +63,7 @@ $memoryStream.Close()
 
 [System.IO.File]::WriteAllBytes($compressedFile, $compressedBytes)
 
-Write-Host "✓ Created: $compressedFile" -ForegroundColor Green
+Write-Host "Created: $compressedFile" -ForegroundColor Green
 Write-Host "  Entropy: ~7.8 (high - typical of compression)" -ForegroundColor Gray
 Write-Host ""
 

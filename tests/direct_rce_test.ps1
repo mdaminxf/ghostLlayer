@@ -1,5 +1,5 @@
 # Direct RCE Test - Create Browser → PowerShell pattern
-Write-Host "🔥 DIRECT RCE TEST - Creating Browser → PowerShell pattern" -ForegroundColor Red
+Write-Host "DIRECT RCE TEST - Creating Browser → PowerShell pattern" -ForegroundColor Red
 
 # Find any browser process
 $browser = Get-Process | Where-Object {$_.ProcessName -match 'chrome|firefox|msedge|brave'} | Select-Object -First 1
