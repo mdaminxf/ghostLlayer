@@ -4,6 +4,28 @@ use std::thread;
 use std::time::Duration;
 use anyhow::{Result, anyhow};
 
+// Behavioral hook types
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub enum HookType {
+    ProcessSpawn,
+    FileWrite,
+    NetworkConnect,
+    ClipboardRead,
+    MemoryAccess,
+}
+
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct SecurityEvent {
+    pub hook_type: HookType,
+    pub process_id: u32,
+    pub target: String,
+    pub data: Option<Vec<u8>>,
+    pub is_user_initiated: bool,
+    pub timestamp: chrono::DateTime<chrono::Utc>,
+}
+
 // Main process monitoring and sandbox management system
 #[derive(Debug)]
 pub struct ProcessSentinel {
@@ -111,22 +133,53 @@ impl ProcessSentinel {
         Ok(())
     }
 
-    // Real Time interception functions
-    
-    // Register minimal hooks for trusted apps
+    // Register behavioral analysis hooks for trusted apps (Mutiny hooks)
     #[allow(dead_code)]
     fn register_mutiny_hooks(&self, process_id: u32) -> Result<()> {
         println!("Registering mutiny hooks for process {}", process_id);
+        
+        // Minimal hooks for Trusted Apps (Low Overhead)
+        // Hook: Process Spawn - Catch RCE
+        // Hook: File Write - Catch Ransomware
+        
         Ok(())
     }
 
-    // Register full hooks for untrusted apps
+    // Register full behavioral analysis hooks for untrusted apps
     #[allow(dead_code)]
     fn register_full_hooks(&self, process_id: u32) -> Result<()> {
         println!("Registering full hooks for process {}", process_id);
         
         // Include mutiny hooks
         self.register_mutiny_hooks(process_id)?;
+        
+        // Maximum hooks for Untrusted Apps
+        // Hook: Clipboard Read - Stop Spyware
+        // Hook: Network Connect - Stop Exfiltration
+        // Hook: File Write - Smart Promotion Logic
+        
+        Ok(())
+    }
+
+    // Process security event through behavioral analysis
+    pub fn process_security_event(&self, event: SecurityEvent) -> Result<()> {
+        match event.hook_type {
+            HookType::ProcessSpawn => {
+                println!("Process spawn detected: {} -> {}", event.process_id, event.target);
+            },
+            HookType::FileWrite => {
+                println!("File write detected: {} -> {}", event.process_id, event.target);
+            },
+            HookType::NetworkConnect => {
+                println!("Network connection detected: {} -> {}", event.process_id, event.target);
+            },
+            HookType::ClipboardRead => {
+                println!("Clipboard access detected: {} -> {}", event.process_id, event.target);
+            },
+            HookType::MemoryAccess => {
+                println!("Memory access detected: {} -> {}", event.process_id, event.target);
+            }
+        }
         
         Ok(())
     }
@@ -185,8 +238,7 @@ impl ProcessSentinel {
     }
 
     // Restrict network access for suspicious processes
-    #[allow(dead_code)]
-    fn restrict_network_access(&mut self, process_id: u32) -> Result<()> {
+    pub fn restrict_network_access(&mut self, process_id: u32) -> Result<()> {
         println!("Restricting network access for process {}", process_id);
         
         // Create restricted sandbox for network blocking

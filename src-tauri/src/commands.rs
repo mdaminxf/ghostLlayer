@@ -452,21 +452,27 @@ pub async fn update_process_risk_score(
     let sandbox_manager = sentinel.get_sandbox_manager();
     
     match sandbox_manager.update_risk_score(pid, score_change) {
-        Ok(()) => {
+        Ok((new_score, verdict)) => {
             // Check if we need to evaluate verdict based on new score
-            if let Some(process) = sandbox_manager.get_process(pid) {
-                if process.risk_score >= 80 {
-                    // Migrate to maximum security sandbox
-                    let mut sentinel_mut = Arc::try_unwrap(Arc::clone(&sentinel))
-                        .map_err(|_| "Cannot get mutable reference to sentinel".to_string())?;
-                    
-                    if let Err(e) = sentinel_mut.migrate_to_maximum_security_sandbox(pid) {
-                        return Err(format!("Failed to migrate to max security: {}", e));
-                    }
+            if verdict == "RED_ZONE" {
+                // Migrate to maximum security sandbox
+                let mut sentinel_mut = Arc::try_unwrap(Arc::clone(&sentinel))
+                    .map_err(|_| "Cannot get mutable reference to sentinel".to_string())?;
+                
+                if let Err(e) = sentinel_mut.migrate_to_maximum_security_sandbox(pid) {
+                    return Err(format!("Failed to migrate to max security: {}", e));
+                }
+            } else if verdict == "YELLOW_ZONE" {
+                // Restrict network access
+                let mut sentinel_mut = Arc::try_unwrap(Arc::clone(&sentinel))
+                    .map_err(|_| "Cannot get mutable reference to sentinel".to_string())?;
+                
+                if let Err(e) = sentinel_mut.restrict_network_access(pid) {
+                    return Err(format!("Failed to restrict network: {}", e));
                 }
             }
             
-            Ok(format!("Updated risk score for process {} by {}", pid, score_change))
+            Ok(format!("Updated risk score for process {} to {} - Verdict: {}", pid, new_score, verdict))
         },
         Err(e) => Err(format!("Failed to update risk score: {}", e)),
     }

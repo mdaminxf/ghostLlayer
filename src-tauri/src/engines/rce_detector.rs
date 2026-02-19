@@ -7,6 +7,7 @@ use tokio::sync::Mutex;
 use chrono::Utc;
 use crate::db::{Database, EventLog};
 use dotenv::dotenv;
+use crate::engines::sentinel::{SecurityEvent, HookType};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProcessInfo {
@@ -43,6 +44,8 @@ pub struct RceDetector {
     trusted_document_readers: Vec<String>,
     system_shells: Vec<String>,
     known_processes: Arc<Mutex<HashMap<u32, ProcessInfo>>>,
+    #[allow(dead_code)]
+    sentinel: Option<Arc<crate::engines::sentinel::ProcessSentinel>>,
 }
 
 impl RceDetector {
@@ -76,6 +79,7 @@ impl RceDetector {
                 "sh".to_string(),
             ],
             known_processes: Arc::new(Mutex::new(HashMap::new())),
+            sentinel: None,
         }
     }
 
@@ -84,6 +88,12 @@ impl RceDetector {
             db: Some(db),
             ..Self::new()
         }
+    }
+    
+    #[allow(dead_code)]
+    pub fn with_sentinel(mut self, sentinel: Arc<crate::engines::sentinel::ProcessSentinel>) -> Self {
+        self.sentinel = Some(sentinel);
+        self
     }
     
     // Helper method to check if parent process is a legitimate launcher
@@ -356,6 +366,63 @@ impl RceDetector {
         println!(" Sandbox migration completed - User experience preserved!");
     }
 
+    // Monitor file write operations for ransomware detection
+    #[allow(dead_code)]
+    pub fn monitor_file_write(&self, process_id: u32, file_path: String, data: Vec<u8>, is_user_initiated: bool) {
+        if let Some(sentinel) = &self.sentinel {
+            let event = SecurityEvent {
+                hook_type: HookType::FileWrite,
+                process_id,
+                target: file_path,
+                data: Some(data),
+                is_user_initiated,
+                timestamp: Utc::now(),
+            };
+            
+            if let Err(e) = sentinel.process_security_event(event) {
+                eprintln!("Failed to process file write security event: {}", e);
+            }
+        }
+    }
+    
+    // Monitor network connections
+    #[allow(dead_code)]
+    pub fn monitor_network_connection(&self, process_id: u32, target: String) {
+        if let Some(sentinel) = &self.sentinel {
+            let event = SecurityEvent {
+                hook_type: HookType::NetworkConnect,
+                process_id,
+                target,
+                data: None,
+                is_user_initiated: false,
+                timestamp: Utc::now(),
+            };
+            
+            if let Err(e) = sentinel.process_security_event(event) {
+                eprintln!("Failed to process network security event: {}", e);
+            }
+        }
+    }
+    
+    // Monitor clipboard access
+    #[allow(dead_code)]
+    pub fn monitor_clipboard_access(&self, process_id: u32) {
+        if let Some(sentinel) = &self.sentinel {
+            let event = SecurityEvent {
+                hook_type: HookType::ClipboardRead,
+                process_id,
+                target: "clipboard".to_string(),
+                data: None,
+                is_user_initiated: false,
+                timestamp: Utc::now(),
+            };
+            
+            if let Err(e) = sentinel.process_security_event(event) {
+                eprintln!("Failed to process clipboard security event: {}", e);
+            }
+        }
+    }
+    
     async fn get_ai_explanation(alert: &RceAlert) -> Result<AiExplanation, Box<dyn std::error::Error + Send + Sync>> {
         let _api_key = std::env::var("GEMINI_API_KEY").unwrap_or_else(|_| "your_api_key_here".to_string());
         

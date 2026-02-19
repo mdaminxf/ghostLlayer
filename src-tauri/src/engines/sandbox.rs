@@ -8,6 +8,9 @@ use std::path::PathBuf;
 
 // Configuration thresholds
 const SANDBOX_RAM_LIMIT: u64 = 50 * 1024 * 1024; // Minimum of 50mb ram for sandbox
+pub const SCORE_SAFE: i32 = 20; // Green Zone (Allow Promotion)
+pub const SCORE_SUSPICIOUS: i32 = 50; // Yellow Zone (Restrict Network)
+pub const SCORE_CRITICAL: i32 = 80; // Red Zone (Kill Immediately)
 
 // UI Restriction flags
 #[derive(Debug, Clone)]
@@ -321,8 +324,8 @@ impl SandboxManager {
         Ok(())
     }
 
-    // Update process risk score
-    pub fn update_risk_score(&self, process_id: u32, score_change: i32) -> Result<()> {
+    // Update process risk score with threshold evaluation
+    pub fn update_risk_score(&self, process_id: u32, score_change: i32) -> Result<(i32, String)> {
         let mut processes = self.processes.lock().unwrap();
         
         if let Some(process) = processes.get_mut(&process_id) {
@@ -330,17 +333,27 @@ impl SandboxManager {
             // Ensure risk score stays within bounds (0-100)
             process.risk_score = process.risk_score.clamp(0, 100);
             process.last_activity = Utc::now();
-            println!("Updated risk score for process {} to {}", process_id, process.risk_score);
-            Ok(())
+            
+            let verdict = self.evaluate_verdict(process.risk_score);
+            println!("Updated risk score for process {} to {} - Verdict: {}", 
+                process_id, process.risk_score, verdict);
+            Ok((process.risk_score, verdict))
         } else {
             Err(anyhow!("Process {} not found", process_id))
         }
     }
-
-    // Get process metadata
-    pub fn get_process(&self, process_id: u32) -> Option<ProcessMetadata> {
-        let processes = self.processes.lock().unwrap();
-        processes.get(&process_id).cloned()
+    
+    // Evaluate verdict based on risk score thresholds
+    fn evaluate_verdict(&self, risk_score: i32) -> String {
+        if risk_score >= SCORE_CRITICAL {
+            "RED_ZONE".to_string()
+        } else if risk_score >= SCORE_SUSPICIOUS {
+            "YELLOW_ZONE".to_string()
+        } else if risk_score >= SCORE_SAFE {
+            "GREEN_ZONE".to_string()
+        } else {
+            "SAFE".to_string()
+        }
     }
 
     // Add sandbox health monitoring and recovery
