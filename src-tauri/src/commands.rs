@@ -1,5 +1,6 @@
 use crate::db::{Database, EventLog, WhitelistEntry};
 use crate::whitelist::{WhitelistManager, FileStatus};
+use crate::engines::sentinel::ProcessSentinel;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use sysinfo::{Pid, System};
@@ -380,4 +381,93 @@ pub async fn get_trusted_apps() -> Result<Vec<crate::whitelist::TrustedApp>, Str
         .map_err(|e| format!("Failed to load whitelist: {}", e))?;
     
     Ok(whitelist_manager.get_trusted_apps().to_vec())
+}
+
+// Sandbox management commands
+
+#[derive(Debug, Serialize)]
+pub struct SandboxStatus {
+    pub active_sandboxes: usize,
+    pub sandboxed_processes: Vec<SandboxedProcessInfo>,
+    pub total_processes: usize,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SandboxedProcessInfo {
+    pub pid: u32,
+    pub name: String,
+    pub risk_score: i32,
+    pub sandbox_id: Option<String>,
+    pub is_trusted: bool,
+}
+
+#[tauri::command]
+pub async fn migrate_process_to_sandbox(
+    pid: u32,
+    sentinel: State<'_, Arc<ProcessSentinel>>,
+) -> Result<String, String> {
+    // Get mutable reference to sentinel for migration
+    let mut sentinel_mut = Arc::try_unwrap(Arc::clone(&sentinel))
+        .map_err(|_| "Cannot get mutable reference to sentinel".to_string())?;
+    
+    match sentinel_mut.migrate_to_restricted_sandbox(pid) {
+        Ok(()) => Ok(format!("Process {} migrated to sandbox successfully", pid)),
+        Err(e) => Err(format!("Failed to migrate process: {}", e)),
+    }
+}
+
+#[tauri::command]
+pub async fn get_sandbox_status(
+    sentinel: State<'_, Arc<ProcessSentinel>>,
+) -> Result<SandboxStatus, String> {
+    let sandbox_manager = sentinel.get_sandbox_manager();
+    let processes = sandbox_manager.processes.lock().unwrap();
+    
+    let sandboxed_processes: Vec<SandboxedProcessInfo> = processes
+        .values()
+        .map(|p| SandboxedProcessInfo {
+            pid: p.id,
+            name: p.name.clone(),
+            risk_score: p.risk_score,
+            sandbox_id: p.sandbox_handle.as_ref().map(|s| s.id.clone()),
+            is_trusted: p.is_trusted,
+        })
+        .collect();
+    
+    let sandboxes = sandbox_manager.sandboxes.lock().unwrap();
+    
+    Ok(SandboxStatus {
+        active_sandboxes: sandboxes.len(),
+        sandboxed_processes,
+        total_processes: processes.len(),
+    })
+}
+
+#[tauri::command]
+pub async fn update_process_risk_score(
+    pid: u32,
+    score_change: i32,
+    sentinel: State<'_, Arc<ProcessSentinel>>,
+) -> Result<String, String> {
+    let sandbox_manager = sentinel.get_sandbox_manager();
+    
+    match sandbox_manager.update_risk_score(pid, score_change) {
+        Ok(()) => {
+            // Check if we need to evaluate verdict based on new score
+            if let Some(process) = sandbox_manager.get_process(pid) {
+                if process.risk_score >= 80 {
+                    // Migrate to maximum security sandbox
+                    let mut sentinel_mut = Arc::try_unwrap(Arc::clone(&sentinel))
+                        .map_err(|_| "Cannot get mutable reference to sentinel".to_string())?;
+                    
+                    if let Err(e) = sentinel_mut.migrate_to_maximum_security_sandbox(pid) {
+                        return Err(format!("Failed to migrate to max security: {}", e));
+                    }
+                }
+            }
+            
+            Ok(format!("Updated risk score for process {} by {}", pid, score_change))
+        },
+        Err(e) => Err(format!("Failed to update risk score: {}", e)),
+    }
 }

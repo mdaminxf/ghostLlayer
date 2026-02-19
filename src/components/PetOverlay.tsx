@@ -45,7 +45,7 @@ function PetOverlay() {
         backgroundColor: isAlarmed ? '#ef4444' : '#8b5cf6',
         color: 'white'
       }}>
-        {isAlarmed ? '🚨 ALERT!' : '✓ Safe'}
+        {isAlarmed ? `🚨 ALERT! (${alertCount})` : `✓ Safe (${alertCount})`}
       </div>
       
       <svg

@@ -174,10 +174,12 @@ function Dashboard() {
   return (
     <div className="min-h-screen bg-gray-900 text-gray-100 p-6">
       <header className="mb-8">
-        <h1 className="text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-600">
-          Ghost Layer Security Console
-        </h1>
-        <p className="text-gray-400 mt-2">Industrial-grade threat detection and isolation</p>
+        <div>
+          <h1 className="text-4xl font-bold text-transparent bg-clip-text bg-gradient-b-to-r from-purple-400 to-pink-600">
+            Ghost Layer Security Console
+          </h1>
+          <p className="text-gray-400 mt-2">Industrial-grade threat detection and isolation</p>
+        </div>
       </header>
 
       {/* System Health */}
@@ -484,5 +486,4 @@ function Dashboard() {
     </div>
   );
 }
-
 export default Dashboard;
