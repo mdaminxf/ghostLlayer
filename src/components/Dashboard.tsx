@@ -45,6 +45,10 @@ function Dashboard() {
   const [showAiModal, setShowAiModal] = useState(false);
   const [showRceAlert, setShowRceAlert] = useState(false);
   const [currentRceAlert, setCurrentRceAlert] = useState<EventLog | null>(null);
+  
+  // Threat confirmation dialog state
+  const [showThreatConfirmation, setShowThreatConfirmation] = useState(false);
+  const [currentThreat, setCurrentThreat] = useState<any>(null);
 
   useEffect(() => {
     loadLogs();
@@ -74,9 +78,24 @@ function Dashboard() {
       }
     });
 
+    // Listen for threat confirmation requests
+    const unlistenThreatConfirm = currentWindow.listen("threat-confirmation-request", (event: any) => {
+      const threat = event.payload;
+      console.log('Threat confirmation request received:', threat);
+      setCurrentThreat(threat);
+      setShowThreatConfirmation(true);
+      
+      // Auto-play alert sound (if available)
+      const audio = new Audio('/alert.mp3');
+      audio.play().catch(() => {
+        console.log('Alert sound not available');
+      });
+    });
+
     return () => {
       clearInterval(interval);
       unlisten.then((fn) => fn());
+      unlistenThreatConfirm.then((fn) => fn());
     };
   }, []);
 
@@ -158,6 +177,28 @@ function Dashboard() {
     }
   };
 
+  const handleThreatDecision = async (shouldRemove: boolean) => {
+    if (!currentThreat) return;
+    
+    try {
+      const result = await invoke("handle_threat_decision", {
+        alertId: currentThreat.alert_id,
+        shouldRemove: shouldRemove,
+        pid: currentThreat.child_pid
+      });
+      
+      console.log('Threat decision result:', result);
+      setShowThreatConfirmation(false);
+      setCurrentThreat(null);
+      
+      // Refresh logs to see the action result
+      loadLogs();
+    } catch (error) {
+      console.error("Failed to handle threat decision:", error);
+      alert(`Failed to process threat decision: ${error}`);
+    }
+  };
+
   const getSeverityColor = (severity: string) => {
     switch (severity.toUpperCase()) {
       case "CRITICAL":
@@ -169,6 +210,52 @@ function Dashboard() {
       default:
         return "text-blue-500";
     }
+  };
+
+  const getThreatTypeIcon = (threatType: string) => {
+    const type = threatType.toLowerCase();
+    if (type.includes('rce')) return '🚨';
+    if (type.includes('malware') || type.includes('virus')) return '🦠';
+    if (type.includes('ransom')) return '🔒';
+    if (type.includes('keylog')) return '⌨️';
+    if (type.includes('credential')) return '🔑';
+    if (type.includes('miner')) return '⛏️';
+    if (type.includes('backdoor') || type.includes('trojan')) return '🚪';
+    if (type.includes('inject')) return '💉';
+    if (type.includes('suspicious')) return '⚠️';
+    return '🔍';
+  };
+
+  const getThreatTypeBadge = (threatType: string) => {
+    const type = threatType.toLowerCase();
+    if (type.includes('rce')) {
+      return <span className="bg-red-600 text-white text-xs px-2 py-1 rounded-full font-semibold">RCE</span>;
+    }
+    if (type.includes('malware') || type.includes('virus')) {
+      return <span className="bg-purple-600 text-white text-xs px-2 py-1 rounded-full font-semibold">MALWARE</span>;
+    }
+    if (type.includes('ransom')) {
+      return <span className="bg-orange-600 text-white text-xs px-2 py-1 rounded-full font-semibold">RANSOMWARE</span>;
+    }
+    if (type.includes('keylog')) {
+      return <span className="bg-pink-600 text-white text-xs px-2 py-1 rounded-full font-semibold">KEYLOGGER</span>;
+    }
+    if (type.includes('credential')) {
+      return <span className="bg-indigo-600 text-white text-xs px-2 py-1 rounded-full font-semibold">CRED THEFT</span>;
+    }
+    if (type.includes('miner')) {
+      return <span className="bg-yellow-600 text-white text-xs px-2 py-1 rounded-full font-semibold">MINER</span>;
+    }
+    if (type.includes('backdoor') || type.includes('trojan')) {
+      return <span className="bg-red-700 text-white text-xs px-2 py-1 rounded-full font-semibold">BACKDOOR</span>;
+    }
+    if (type.includes('inject')) {
+      return <span className="bg-violet-600 text-white text-xs px-2 py-1 rounded-full font-semibold">INJECTION</span>;
+    }
+    if (type.includes('suspicious')) {
+      return <span className="bg-gray-600 text-white text-xs px-2 py-1 rounded-full font-semibold">SUSPICIOUS</span>;
+    }
+    return <span className="bg-blue-600 text-white text-xs px-2 py-1 rounded-full font-semibold">THREAT</span>;
   };
 
   return (
@@ -235,14 +322,11 @@ function Dashboard() {
                 <div key={idx} className="bg-gray-700 rounded p-4 border border-gray-600 hover:border-gray-500 transition-colors">
                   <div className="flex justify-between items-start mb-3">
                     <div className="flex items-center gap-2">
+                      <span className="text-lg mr-2">{getThreatTypeIcon(log.threat_type)}</span>
                       <span className={`font-bold text-lg ${getSeverityColor(log.severity)}`}>
                         {log.severity}
                       </span>
-                      {log.threat_type.toLowerCase().includes('rce') && (
-                        <span className="bg-red-600 text-white text-xs px-2 py-1 rounded-full font-semibold">
-                          RCE
-                        </span>
-                      )}
+                      {getThreatTypeBadge(log.threat_type)}
                     </div>
                     <span className="text-xs text-gray-400">
                       {new Date(log.timestamp).toLocaleString()}
@@ -282,6 +366,16 @@ function Dashboard() {
                     {log.threat_type.toLowerCase().includes('rce') && (
                       <div className="text-xs bg-red-900 bg-opacity-50 px-2 py-1 rounded text-red-300">
                         Remote Code Execution Attempt
+                      </div>
+                    )}
+                    {log.threat_type.toLowerCase().includes('malware') && (
+                      <div className="text-xs bg-purple-900 bg-opacity-50 px-2 py-1 rounded text-purple-300">
+                        Malicious Software Detected
+                      </div>
+                    )}
+                    {log.threat_type.toLowerCase().includes('ransom') && (
+                      <div className="text-xs bg-orange-900 bg-opacity-50 px-2 py-1 rounded text-orange-300">
+                        Ransomware Activity
                       </div>
                     )}
                   </div>
@@ -479,6 +573,71 @@ function Dashboard() {
                   </button>
                 </div>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Threat Confirmation Modal */}
+      {showThreatConfirmation && currentThreat && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-gray-800 rounded-lg p-6 max-w-2xl border border-gray-700 shadow-2xl">
+            <div className="flex justify-between items-center mb-6 border-b border-gray-700 pb-4">
+              <div>
+                <h3 className="text-xl font-bold text-red-400 flex items-center gap-2">
+                  🚨 Threat Detected - Action Required
+                </h3>
+                <p className="text-sm text-gray-400 mt-1">
+                  Immediate user decision needed to handle security threat
+                </p>
+              </div>
+              <button
+                onClick={() => setShowThreatConfirmation(false)}
+                className="text-gray-400 hover:text-white text-xl hover:bg-gray-700 w-8 h-8 rounded-full flex items-center justify-center transition-colors"
+              >
+                ×
+              </button>
+            </div>
+            
+            <div className="space-y-4 mb-6">
+              <div className="bg-red-900 bg-opacity-30 border border-red-700 rounded p-4">
+                <h4 className="font-semibold text-red-400 mb-2">Threat Details:</h4>
+                <div className="space-y-2 text-sm">
+                  <div><span className="text-gray-400">Type:</span> <span className="text-red-300 font-semibold">{currentThreat.alert_type}</span></div>
+                  <div><span className="text-gray-400">Process:</span> <span className="text-red-300 font-mono">{currentThreat.child_process} (PID: {currentThreat.child_pid})</span></div>
+                  <div><span className="text-gray-400">Parent:</span> <span className="text-red-300 font-mono">{currentThreat.parent_process} (PID: {currentThreat.parent_pid})</span></div>
+                  <div><span className="text-gray-400">Severity:</span> <span className="text-red-300 font-semibold">{currentThreat.severity}</span></div>
+                </div>
+              </div>
+              
+              <div className="bg-gray-900 border border-gray-700 rounded p-4">
+                <h4 className="font-semibold text-yellow-400 mb-2">Explanation:</h4>
+                <p className="text-sm text-gray-300 leading-relaxed">
+                  {currentThreat.explanation}
+                </p>
+              </div>
+              
+              <div className="bg-blue-900 bg-opacity-30 border border-blue-700 rounded p-4">
+                <h4 className="font-semibold text-blue-400 mb-2">Recommended Action:</h4>
+                <p className="text-sm text-blue-300">
+                  {currentThreat.message}
+                </p>
+              </div>
+            </div>
+            
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => handleThreatDecision(false)}
+                className="bg-gray-600 hover:bg-gray-700 px-6 py-3 rounded text-white font-medium transition-colors"
+              >
+                Ignore Threat
+              </button>
+              <button
+                onClick={() => handleThreatDecision(true)}
+                className="bg-red-600 hover:bg-red-700 px-6 py-3 rounded text-white font-medium transition-colors flex items-center gap-2"
+              >
+                🗑️ Remove Threat
+              </button>
             </div>
           </div>
         </div>

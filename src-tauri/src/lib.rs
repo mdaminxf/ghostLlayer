@@ -95,6 +95,7 @@ pub fn run() {
             commands::migrate_process_to_sandbox,
             commands::get_sandbox_status,
             commands::update_process_risk_score,
+            commands::handle_threat_decision,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

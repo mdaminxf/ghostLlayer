@@ -5,9 +5,8 @@ use sysinfo::{Pid, System};
 use tauri::{AppHandle, Emitter};
 use tokio::sync::Mutex;
 use chrono::Utc;
-use crate::db::{Database, EventLog};
 use dotenv::dotenv;
-use crate::engines::sentinel::{SecurityEvent, HookType};
+use crate::db::Database;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProcessInfo {
@@ -29,19 +28,14 @@ pub struct RceAlert {
     pub severity: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AiExplanation {
-    pub original_alert: String,
-    pub explanation: String,
-    pub recommendations: Vec<String>,
-    pub confidence: f64,
-}
-
 #[derive(Debug, Clone)]
 pub struct RceDetector {
     db: Option<Arc<Database>>,
+    #[allow(dead_code)]
     trusted_browsers: Vec<String>,
+    #[allow(dead_code)]
     trusted_document_readers: Vec<String>,
+    #[allow(dead_code)]
     system_shells: Vec<String>,
     known_processes: Arc<Mutex<HashMap<u32, ProcessInfo>>>,
     #[allow(dead_code)]
@@ -100,8 +94,8 @@ impl RceDetector {
     fn is_legitimate_launcher(&self, parent_name: &str) -> bool {
         let legitimate_launchers = vec![
             "explorer", "winlogon", "services", "svchost", "csrss", "smss",
-            "wininit", "spoolsv", "lsass", "taskmgr", "regedit", "powershell",
-            "cmd", "conhost", "wsmprovhost", "system", "registry"
+            "wininit", "spoolsv", "lsass", "taskmgr", "regedit", "conhost", 
+            "wsmprovhost", "system", "registry"
         ];
         
         legitimate_launchers.iter().any(|launcher| parent_name.contains(launcher))
@@ -116,14 +110,23 @@ impl RceDetector {
             "powershell", "cmd", "conhost", "wsmprovhost", "system",
             "chrome", "firefox", "msedge", "brave", "opera",
             "winword", "excel", "powerpnt", "acrobat", "wordpad", "notepad",
-            "dllhost", "runtimebroker", "sihost", "securityhealthsystray"
+            "dllhost", "runtimebroker", "sihost", "securityhealthsystray",
+            "msfeedssync", "runtimebroker", "audiodg", "dwm", "windefend"
         ];
         
         let process_lower = process_name.to_lowercase();
         
-        // Check built-in whitelist
+        // First check built-in whitelist - be more permissive for system processes
         if whitelisted_processes.iter().any(|whitelisted| process_lower.contains(whitelisted)) {
             return true;
+        }
+        
+        // Additional check for Windows system executables
+        if process_lower.ends_with(".exe") {
+            let base_name = process_lower.replace(".exe", "");
+            if whitelisted_processes.iter().any(|whitelisted| base_name.contains(whitelisted)) {
+                return true;
+            }
         }
         
         // Check database whitelist if available
@@ -150,74 +153,140 @@ impl RceDetector {
             let mut sys = System::new_all();
             let mut last_check = std::time::Instant::now();
             
+            // Initialize with all existing processes
+            sys.refresh_all();
+            {
+                let mut known = known_processes.lock().await;
+                for (pid, process) in sys.processes() {
+                    let pid_u32 = pid.as_u32();
+                    let process_info = ProcessInfo {
+                        name: process.name().to_string_lossy().to_string(),
+                        pid: pid_u32,
+                        parent_pid: process.parent().map(|p| p.as_u32()),
+                    };
+                    known.insert(pid_u32, process_info);
+                }
+                println!(" Initialized with {} existing processes", sys.processes().len());
+            }
+            
             loop {
                 sys.refresh_all();
                 
                 // Check for new processes every 2 seconds
                 if last_check.elapsed().as_secs() >= 2 {
-                    for (pid, process) in sys.processes() {
-                        let pid_u32 = pid.as_u32();
+                    // First collect new processes
+                    let mut new_processes = Vec::new();
+                    {
+                        let known = known_processes.lock().await;
                         
-                        // Check if this is a new process
-                        let mut known = known_processes.lock().await;
-                        if !known.contains_key(&pid_u32) {
-                            let process_info = ProcessInfo {
-                                name: process.name().to_string_lossy().to_string(),
-                                pid: pid_u32,
-                                parent_pid: process.parent().map(|p| p.as_u32()),
-                            };
+                        for (pid, process) in sys.processes() {
+                            let pid_u32 = pid.as_u32();
                             
-                            // Log the parent-child relationship
-                            if let Some(parent_pid) = process_info.parent_pid {
-                                let parent_name = match sys.process(Pid::from_u32(parent_pid)) {
-                                    Some(p) => p.name().to_string_lossy().to_string(),
-                                    None => "unknown".to_string(),
+                            // Check if this is a new process
+                            if !known.contains_key(&pid_u32) {
+                                let process_info = ProcessInfo {
+                                    name: process.name().to_string_lossy().to_string(),
+                                    pid: pid_u32,
+                                    parent_pid: process.parent().map(|p| p.as_u32()),
                                 };
-                                println!(" Parent-Child: {} ({}) → {} ({})", 
-                                    parent_name, parent_pid, process_info.name, process_info.pid);
+                                
+                                // Log the parent-child relationship
+                                if let Some(parent_pid) = process_info.parent_pid {
+                                    let parent_name = match sys.process(Pid::from_u32(parent_pid)) {
+                                        Some(p) => p.name().to_string_lossy().to_string(),
+                                        None => "unknown".to_string(),
+                                    };
+                                    println!(" Parent-Child: {} ({}) → {} ({})", 
+                                        parent_name, parent_pid, process_info.name, process_info.pid);
+                                }
+                                
+                                new_processes.push(process_info);
                             }
-                            
-                            known.insert(pid_u32, process_info.clone());
-                            drop(known);
-                            
-                            // Check for RCE exploit
-                            match detector.check_rce_exploit(&process_info, &sys).await {
-                                Some(alert) => {
-                                    println!(" RCE Alert emitted: {:?}", alert);
-                
-                                    let app_handle = Arc::clone(&app_handle);
-                
-                                    // Log the threat
-                                    if let Err(e) = app_handle.emit("rce-alert", &alert) {
-                                        eprintln!("Failed to emit rce-alert: {}", e);
-                                    }
-                                    println!(" RCE Alert emitted: {:?}", alert);
-                                    
-                                    // Also emit as general threat alert for frontend
-                                    if let Err(e) = app_handle.emit("threat-alert", &serde_json::json!({
-                                        "id": None::<Option<i64>>,
-                                        "threat_type": alert.alert_type,
-                                        "severity": alert.severity,
-                                        "target": format!("{} (PID: {}) -> {} (PID: {})", 
-                                            alert.parent_process, alert.parent_pid, 
-                                            alert.child_process, alert.child_pid),
-                                        "timestamp": alert.timestamp,
-                                        "entropy": None::<Option<f64>>,
-                                        "additional_info": serde_json::json!({
-                                            "parent_process_name": alert.parent_process,
-                                            "child_process_name": alert.child_process,
-                                        }),
-                                    })) {
-                                        eprintln!("Failed to emit threat-alert: {}", e);
-                                    }
-                                    println!(" Threat alert sent to frontend");
-                                    
-                                    // Take action
-                                    detector.handle_rce_exploit(&alert, &app_handle).await;
+                        }
+                    }
+                    
+                    // Now process the new processes
+                    for process_info in new_processes {
+                        // Add to known processes
+                        {
+                            let mut known = known_processes.lock().await;
+                            known.insert(process_info.pid, process_info.clone());
+                        }
+                        
+                        // Check for RCE exploit
+                        match detector.check_rce_exploit(&process_info, &sys).await {
+                            Some(alert) => {
+                                println!(" RCE Alert emitted: {:?}", alert);
+            
+                                let app_handle = Arc::clone(&app_handle);
+            
+                                // Log the threat
+                                if let Err(e) = app_handle.emit("rce-alert", &alert) {
+                                    eprintln!("Failed to emit rce-alert: {}", e);
                                 }
-                                None => {
-                                    // No threat detected, continue monitoring
+                                println!(" RCE Alert emitted: {:?}", alert);
+                                
+                                // Also emit as general threat alert for frontend
+                                if let Err(e) = app_handle.emit("threat-alert", &serde_json::json!({
+                                    "id": None::<Option<i64>>,
+                                    "threat_type": alert.alert_type,
+                                    "severity": alert.severity,
+                                    "target": format!("{} (PID: {}) -> {} (PID: {})", 
+                                        alert.parent_process, alert.parent_pid, 
+                                        alert.child_process, alert.child_pid),
+                                    "timestamp": alert.timestamp,
+                                    "entropy": None::<Option<f64>>,
+                                    "additional_info": serde_json::json!({
+                                        "parent_process_name": alert.parent_process,
+                                        "child_process_name": alert.child_process,
+                                    }),
+                                })) {
+                                    eprintln!("Failed to emit threat-alert: {}", e);
                                 }
+                                println!(" Threat alert sent to frontend");
+                                
+                                // Emit threat confirmation request for user decision
+                                if let Err(e) = app_handle.emit("threat-confirmation-request", &serde_json::json!({
+                                    "alert_id": format!("{}-{}", alert.alert_type, alert.child_pid),
+                                    "alert_type": alert.alert_type,
+                                    "parent_process": alert.parent_process,
+                                    "parent_pid": alert.parent_pid,
+                                    "child_process": alert.child_process,
+                                    "child_pid": alert.child_pid,
+                                    "timestamp": alert.timestamp,
+                                    "explanation": alert.explanation,
+                                    "severity": alert.severity,
+                                    "action_required": "USER_DECISION",
+                                    "message": format!("Threat detected: {} ({}) spawned by {} ({}). Do you want to remove this threat?", 
+                                        alert.child_process, alert.child_pid, alert.parent_process, alert.parent_pid)
+                                })) {
+                                    eprintln!("Failed to emit threat-confirmation-request: {}", e);
+                                }
+                                println!(" Threat confirmation request sent to user");
+                                
+                                // Also emit as general threat alert for frontend display
+                                if let Err(e) = app_handle.emit("threat-alert", &serde_json::json!({
+                                    "id": None::<Option<i64>>,
+                                    "threat_type": alert.alert_type,
+                                    "severity": alert.severity,
+                                    "target": format!("{} (PID: {}) -> {} (PID: {})", 
+                                        alert.parent_process, alert.parent_pid, 
+                                        alert.child_process, alert.child_pid),
+                                    "timestamp": alert.timestamp,
+                                    "entropy": None::<Option<f64>>,
+                                    "additional_info": serde_json::json!({
+                                        "parent_process_name": alert.parent_process,
+                                        "child_process_name": alert.child_process,
+                                        "requires_user_action": true,
+                                        "alert_id": format!("{}-{}", alert.alert_type, alert.child_pid)
+                                    }),
+                                })) {
+                                    eprintln!("Failed to emit threat-alert: {}", e);
+                                }
+                                println!(" Threat alert sent to frontend");
+                            }
+                            None => {
+                                // No threat detected, continue monitoring
                             }
                         }
                     }
@@ -235,47 +304,73 @@ impl RceDetector {
     async fn check_rce_exploit(&self, process_info: &ProcessInfo, sys: &System) -> Option<RceAlert> {
         let child_name_lower = process_info.name.to_lowercase();
         
-        // First check if process is whitelisted - if so, skip detection
-        if self.is_process_whitelisted(&process_info.name) {
-            return None;
-        }
+        println!(" DEBUG: Checking process: {} (PID: {})", process_info.name, process_info.pid);
         
-        // Enhanced threat detection - detect all our test patterns
+        // 3. Detect suspicious process names (common malware patterns) - Check this AFTER whitelist!
+        let suspicious_patterns = vec![
+            "temp", "tmp", "cache", "download", "appdata", "malware", "virus",
+            "trojan", "backdoor", "rootkit", "keylog", "bot", "miner",
+            "crypt", "encrypt", "ransom", "lock", "decode", "inject",
+            "hack", "crack", "exploit", "payload", "dropper", "loader",
+        ];
         
-        // 1. RCE Detection (Browser → Shell)
-        if let Some(parent_pid) = process_info.parent_pid {
-            if let Some(parent_process) = sys.process(Pid::from_u32(parent_pid)) {
-                let parent_name = parent_process.name().to_string_lossy().to_lowercase();
-                
-                // Check if parent is a browser or document reader
-                let is_suspicious_parent = self.trusted_browsers.iter().any(|browser| parent_name.contains(browser)) ||
-                                           self.trusted_document_readers.iter().any(|reader| parent_name.contains(reader));
-                
-                let is_shell_child = self.system_shells.iter().any(|shell| child_name_lower.contains(shell));
-                
-                if is_suspicious_parent && is_shell_child {
+        // Only check suspicious patterns if not whitelisted
+        if !self.is_process_whitelisted(&process_info.name) {
+            for pattern in suspicious_patterns {
+                if child_name_lower.contains(pattern) {
+                    println!(" DEBUG: Found suspicious pattern '{}' in process '{}'", pattern, process_info.name);
+                    println!(" DEBUG: ALERT! Suspicious process detected: {}", process_info.name);
                     return Some(RceAlert {
-                        alert_type: "RCE_EXPLOIT".to_string(),
-                        parent_process: parent_process.name().to_string_lossy().to_string(),
-                        parent_pid,
+                        alert_type: "SUSPICIOUS_PROCESS_NAME".to_string(),
+                        parent_process: process_info.parent_pid.map(|p| format!("PID: {}", p)).unwrap_or_else(|| "Unknown".to_string()),
+                        parent_pid: process_info.parent_pid.unwrap_or(0),
                         child_process: process_info.name.clone(),
                         child_pid: process_info.pid,
                         timestamp: Utc::now().to_rfc3339(),
                         explanation: format!(
-                            "RCE ATTACK: {} (PID: {}) spawned {} (PID: {}).\nClassic Remote Code Execution pattern detected.",
-                            parent_process.name().to_string_lossy(),
-                            parent_pid,
-                            process_info.name,
-                            process_info.pid
+                            "SUSPICIOUS PROCESS: {} (PID: {}) contains suspicious pattern '{}'",
+                            process_info.name, process_info.pid, pattern
                         ),
-                        action_taken: "Process isolated and sandboxed".to_string(),
-                        severity: "CRITICAL".to_string(),
+                        action_taken: "Process flagged for manual review".to_string(),
+                        severity: "MEDIUM".to_string(),
                     });
                 }
             }
         }
         
-        // 2. Detect PowerShell activity (ransomware, injection, persistence, network)
+        // 3. Detect shell-to-shell spawning (classic RCE pattern)
+        // This catches when PowerShell/CMD spawns other shells - very suspicious
+        // This check happens BEFORE whitelist to catch all shell-to-shell patterns
+        if child_name_lower.contains("powershell") || child_name_lower.contains("cmd") {
+            if let Some(parent_pid) = process_info.parent_pid {
+                if let Some(parent_process) = sys.process(Pid::from_u32(parent_pid)) {
+                    let parent_name = parent_process.name().to_string_lossy().to_lowercase();
+                    
+                    // Detect shell spawning another shell (highly suspicious RCE pattern)
+                    if parent_name.contains("powershell") || parent_name.contains("cmd") {
+                        println!(" DEBUG: Shell-to-shell spawning detected: {} ({}) -> {} ({})", 
+                            parent_name, parent_pid, process_info.name, process_info.pid);
+                        
+                        return Some(RceAlert {
+                            alert_type: "SHELL_SPAWN_SHELL".to_string(),
+                            parent_process: parent_name.clone(),
+                            parent_pid: parent_pid,
+                            child_process: process_info.name.clone(),
+                            child_pid: process_info.pid,
+                            timestamp: Utc::now().to_rfc3339(),
+                            explanation: format!(
+                                "CRITICAL: Shell process {} (PID: {}) spawned another shell {} (PID: {}) - Classic RCE exploitation pattern",
+                                parent_name.clone(), parent_pid, process_info.name, process_info.pid
+                            ),
+                            action_taken: "Process isolated for analysis - Potential RCE exploit".to_string(),
+                            severity: "CRITICAL".to_string(),
+                        });
+                    }
+                }
+            }
+        }
+        
+        // 4. Now check whitelist for other processes (but not for RCE which we already handled)
         // Only flag PowerShell/CMD if spawned by suspicious parent processes
         if child_name_lower.contains("powershell") || child_name_lower.contains("cmd") {
             // Check if parent is suspicious (not a legitimate system process)
@@ -317,135 +412,6 @@ impl RceDetector {
         }
         
         None
-    }
-
-    async fn handle_rce_exploit(&self, alert: &RceAlert, app_handle: &Arc<AppHandle>) {
-        // Log to database first
-        if let Some(db) = &self.db {
-            let event_log = EventLog {
-                id: None,
-                threat_type: alert.alert_type.clone(),
-                severity: alert.severity.clone(),
-                target: format!("{} (PID: {}) -> {} (PID: {})", 
-                    alert.parent_process, alert.parent_pid, 
-                    alert.child_process, alert.child_pid),
-                timestamp: alert.timestamp.clone(),
-                entropy: None,
-            };
-            
-            if let Err(e) = db.log_event(&event_log) {
-                eprintln!("Failed to log RCE alert to database: {}", e);
-            }
-        }
-        
-        // Use sandbox migration instead of killing
-        self.migrate_to_sandbox_instead_of_kill(alert, app_handle).await;
-    }
-
-    async fn migrate_to_sandbox_instead_of_kill(&self, alert: &RceAlert, app_handle: &Arc<AppHandle>) {
-        println!(" RCE DETECTED - Migrating to sandbox instead of killing");
-        println!(" Parent: {} (PID: {}) -> Child: {} (PID: {})", 
-            alert.parent_process, alert.parent_pid, 
-            alert.child_process, alert.child_pid);
-        
-        // TODO: Integrate with actual sandbox system
-        println!(" Creating sandbox for compromised process...");
-        println!(" Setting up virtual filesystem...");
-        println!(" Blocking network access...");
-        println!(" Applying memory limits...");
-        
-        // Send AI explanation request
-        let ai_alert = alert.clone();
-        let app_handle_clone = Arc::clone(app_handle);
-        tokio::spawn(async move {
-            if let Ok(explanation) = Self::get_ai_explanation(&ai_alert).await {
-                let _ = app_handle_clone.emit("ai-explanation", &explanation);
-            }
-        });
-        
-        println!(" Sandbox migration completed - User experience preserved!");
-    }
-
-    // Monitor file write operations for ransomware detection
-    #[allow(dead_code)]
-    pub fn monitor_file_write(&self, process_id: u32, file_path: String, data: Vec<u8>, is_user_initiated: bool) {
-        if let Some(sentinel) = &self.sentinel {
-            let event = SecurityEvent {
-                hook_type: HookType::FileWrite,
-                process_id,
-                target: file_path,
-                data: Some(data),
-                is_user_initiated,
-                timestamp: Utc::now(),
-            };
-            
-            if let Err(e) = sentinel.process_security_event(event) {
-                eprintln!("Failed to process file write security event: {}", e);
-            }
-        }
-    }
-    
-    // Monitor network connections
-    #[allow(dead_code)]
-    pub fn monitor_network_connection(&self, process_id: u32, target: String) {
-        if let Some(sentinel) = &self.sentinel {
-            let event = SecurityEvent {
-                hook_type: HookType::NetworkConnect,
-                process_id,
-                target,
-                data: None,
-                is_user_initiated: false,
-                timestamp: Utc::now(),
-            };
-            
-            if let Err(e) = sentinel.process_security_event(event) {
-                eprintln!("Failed to process network security event: {}", e);
-            }
-        }
-    }
-    
-    // Monitor clipboard access
-    #[allow(dead_code)]
-    pub fn monitor_clipboard_access(&self, process_id: u32) {
-        if let Some(sentinel) = &self.sentinel {
-            let event = SecurityEvent {
-                hook_type: HookType::ClipboardRead,
-                process_id,
-                target: "clipboard".to_string(),
-                data: None,
-                is_user_initiated: false,
-                timestamp: Utc::now(),
-            };
-            
-            if let Err(e) = sentinel.process_security_event(event) {
-                eprintln!("Failed to process clipboard security event: {}", e);
-            }
-        }
-    }
-    
-    async fn get_ai_explanation(alert: &RceAlert) -> Result<AiExplanation, Box<dyn std::error::Error + Send + Sync>> {
-        let _api_key = std::env::var("GEMINI_API_KEY").unwrap_or_else(|_| "your_api_key_here".to_string());
-        
-        // For now, return a mock explanation
-        Ok(AiExplanation {
-            original_alert: format!("{}: {}", alert.alert_type, alert.explanation),
-            explanation: format!(
-                "This {} attack was detected when {} (PID: {}) was spawned by {} (PID: {}). {}",
-                alert.alert_type.to_lowercase(),
-                alert.child_process,
-                alert.child_pid,
-                alert.parent_process,
-                alert.parent_pid,
-                alert.explanation
-            ),
-            recommendations: vec![
-                "Isolate the affected system from the network".to_string(),
-                "Scan for additional compromised processes".to_string(),
-                "Review recent user activity and installed software".to_string(),
-                "Update security software and run full system scan".to_string(),
-            ],
-            confidence: 0.95,
-        })
     }
 }
 

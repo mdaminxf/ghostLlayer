@@ -477,3 +477,65 @@ pub async fn update_process_risk_score(
         Err(e) => Err(format!("Failed to update risk score: {}", e)),
     }
 }
+
+#[tauri::command]
+pub async fn handle_threat_decision(
+    alert_id: String,
+    should_remove: bool,
+    pid: Option<u32>,
+    db: State<'_, Arc<Database>>,
+) -> Result<String, String> {
+    println!("=== handle_threat_decision called: alert_id={}, should_remove={}, pid={:?} ===", 
+        alert_id, should_remove, pid);
+    
+    if should_remove {
+        if let Some(process_pid) = pid {
+            // Kill the malicious process
+            let mut sys = System::new_all();
+            sys.refresh_all();
+            
+            let pid_obj = Pid::from_u32(process_pid);
+            if let Some(process) = sys.process(pid_obj) {
+                if process.kill() {
+                    // Log the removal action
+                    let removal_log = EventLog {
+                        id: None,
+                        threat_type: "THREAT_REMOVED".to_string(),
+                        severity: "INFO".to_string(),
+                        target: format!("Process {} (PID: {}) terminated by user decision", alert_id, process_pid),
+                        timestamp: chrono::Utc::now().to_rfc3339(),
+                        entropy: None,
+                    };
+                    
+                    if let Err(e) = db.log_event(&removal_log) {
+                        eprintln!("Failed to log threat removal: {}", e);
+                    }
+                    
+                    Ok(format!("Threat removed: Process {} terminated successfully", process_pid))
+                } else {
+                    Err("Failed to terminate malicious process".to_string())
+                }
+            } else {
+                Err("Process not found - may have already terminated".to_string())
+            }
+        } else {
+            Err("No process ID provided for threat removal".to_string())
+        }
+    } else {
+        // User chose to keep the process - log this decision
+        let keep_log = EventLog {
+            id: None,
+            threat_type: "THREAT_IGNORED".to_string(),
+            severity: "WARNING".to_string(),
+            target: format!("User chose to ignore threat: {}", alert_id),
+            timestamp: chrono::Utc::now().to_rfc3339(),
+            entropy: None,
+        };
+        
+        if let Err(e) = db.log_event(&keep_log) {
+            eprintln!("Failed to log threat ignored: {}", e);
+        }
+        
+        Ok("Threat ignored by user choice".to_string())
+    }
+}
