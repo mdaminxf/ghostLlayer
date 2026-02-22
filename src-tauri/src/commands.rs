@@ -1,5 +1,6 @@
 use crate::db::{Database, EventLog, WhitelistEntry};
 use crate::whitelist::{WhitelistManager, FileStatus};
+use crate::engines::sentinel::ProcessSentinel;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use sysinfo::{Pid, System};
@@ -380,4 +381,161 @@ pub async fn get_trusted_apps() -> Result<Vec<crate::whitelist::TrustedApp>, Str
         .map_err(|e| format!("Failed to load whitelist: {}", e))?;
     
     Ok(whitelist_manager.get_trusted_apps().to_vec())
+}
+
+// Sandbox management commands
+
+#[derive(Debug, Serialize)]
+pub struct SandboxStatus {
+    pub active_sandboxes: usize,
+    pub sandboxed_processes: Vec<SandboxedProcessInfo>,
+    pub total_processes: usize,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SandboxedProcessInfo {
+    pub pid: u32,
+    pub name: String,
+    pub risk_score: i32,
+    pub sandbox_id: Option<String>,
+    pub is_trusted: bool,
+}
+
+#[tauri::command]
+pub async fn migrate_process_to_sandbox(
+    pid: u32,
+    sentinel: State<'_, Arc<ProcessSentinel>>,
+) -> Result<String, String> {
+    // Get mutable reference to sentinel for migration
+    let mut sentinel_mut = Arc::try_unwrap(Arc::clone(&sentinel))
+        .map_err(|_| "Cannot get mutable reference to sentinel".to_string())?;
+    
+    match sentinel_mut.migrate_to_restricted_sandbox(pid) {
+        Ok(()) => Ok(format!("Process {} migrated to sandbox successfully", pid)),
+        Err(e) => Err(format!("Failed to migrate process: {}", e)),
+    }
+}
+
+#[tauri::command]
+pub async fn get_sandbox_status(
+    sentinel: State<'_, Arc<ProcessSentinel>>,
+) -> Result<SandboxStatus, String> {
+    let sandbox_manager = sentinel.get_sandbox_manager();
+    let processes = sandbox_manager.processes.lock().unwrap();
+    
+    let sandboxed_processes: Vec<SandboxedProcessInfo> = processes
+        .values()
+        .map(|p| SandboxedProcessInfo {
+            pid: p.id,
+            name: p.name.clone(),
+            risk_score: p.risk_score,
+            sandbox_id: p.sandbox_handle.as_ref().map(|s| s.id.clone()),
+            is_trusted: p.is_trusted,
+        })
+        .collect();
+    
+    let sandboxes = sandbox_manager.sandboxes.lock().unwrap();
+    
+    Ok(SandboxStatus {
+        active_sandboxes: sandboxes.len(),
+        sandboxed_processes,
+        total_processes: processes.len(),
+    })
+}
+
+#[tauri::command]
+pub async fn update_process_risk_score(
+    pid: u32,
+    score_change: i32,
+    sentinel: State<'_, Arc<ProcessSentinel>>,
+) -> Result<String, String> {
+    let sandbox_manager = sentinel.get_sandbox_manager();
+    
+    match sandbox_manager.update_risk_score(pid, score_change) {
+        Ok((new_score, verdict)) => {
+            // Check if we need to evaluate verdict based on new score
+            if verdict == "RED_ZONE" {
+                // Migrate to maximum security sandbox
+                let mut sentinel_mut = Arc::try_unwrap(Arc::clone(&sentinel))
+                    .map_err(|_| "Cannot get mutable reference to sentinel".to_string())?;
+                
+                if let Err(e) = sentinel_mut.migrate_to_maximum_security_sandbox(pid) {
+                    return Err(format!("Failed to migrate to max security: {}", e));
+                }
+            } else if verdict == "YELLOW_ZONE" {
+                // Restrict network access
+                let mut sentinel_mut = Arc::try_unwrap(Arc::clone(&sentinel))
+                    .map_err(|_| "Cannot get mutable reference to sentinel".to_string())?;
+                
+                if let Err(e) = sentinel_mut.restrict_network_access(pid) {
+                    return Err(format!("Failed to restrict network: {}", e));
+                }
+            }
+            
+            Ok(format!("Updated risk score for process {} to {} - Verdict: {}", pid, new_score, verdict))
+        },
+        Err(e) => Err(format!("Failed to update risk score: {}", e)),
+    }
+}
+
+#[tauri::command]
+pub async fn handle_threat_decision(
+    alert_id: String,
+    should_remove: bool,
+    pid: Option<u32>,
+    db: State<'_, Arc<Database>>,
+) -> Result<String, String> {
+    println!("=== handle_threat_decision called: alert_id={}, should_remove={}, pid={:?} ===", 
+        alert_id, should_remove, pid);
+    
+    if should_remove {
+        if let Some(process_pid) = pid {
+            // Kill the malicious process
+            let mut sys = System::new_all();
+            sys.refresh_all();
+            
+            let pid_obj = Pid::from_u32(process_pid);
+            if let Some(process) = sys.process(pid_obj) {
+                if process.kill() {
+                    // Log the removal action
+                    let removal_log = EventLog {
+                        id: None,
+                        threat_type: "THREAT_REMOVED".to_string(),
+                        severity: "INFO".to_string(),
+                        target: format!("Process {} (PID: {}) terminated by user decision", alert_id, process_pid),
+                        timestamp: chrono::Utc::now().to_rfc3339(),
+                        entropy: None,
+                    };
+                    
+                    if let Err(e) = db.log_event(&removal_log) {
+                        eprintln!("Failed to log threat removal: {}", e);
+                    }
+                    
+                    Ok(format!("Threat removed: Process {} terminated successfully", process_pid))
+                } else {
+                    Err("Failed to terminate malicious process".to_string())
+                }
+            } else {
+                Err("Process not found - may have already terminated".to_string())
+            }
+        } else {
+            Err("No process ID provided for threat removal".to_string())
+        }
+    } else {
+        // User chose to keep the process - log this decision
+        let keep_log = EventLog {
+            id: None,
+            threat_type: "THREAT_IGNORED".to_string(),
+            severity: "WARNING".to_string(),
+            target: format!("User chose to ignore threat: {}", alert_id),
+            timestamp: chrono::Utc::now().to_rfc3339(),
+            entropy: None,
+        };
+        
+        if let Err(e) = db.log_event(&keep_log) {
+            eprintln!("Failed to log threat ignored: {}", e);
+        }
+        
+        Ok("Threat ignored by user choice".to_string())
+    }
 }

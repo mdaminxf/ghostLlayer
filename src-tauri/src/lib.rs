@@ -10,6 +10,7 @@ mod test_migration;
 use db::Database;
 use std::sync::Arc;
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
+use engines::sentinel::ProcessSentinel;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -22,6 +23,13 @@ pub fn run() {
             let db_path = app_dir.join("ghost_layer.db");
             let db = Arc::new(Database::new(db_path.to_str().unwrap()).expect("Failed to initialize database"));
             app.manage(db);
+            
+            // Initialize sandbox system
+            let mut sentinel = ProcessSentinel::new();
+            if let Err(e) = sentinel.initialize() {
+                eprintln!("Failed to initialize sentinel: {}", e);
+            }
+            app.manage(Arc::new(sentinel));
             
             // Create main dashboard window
             let _main_window = WebviewWindowBuilder::new(
@@ -52,6 +60,7 @@ pub fn run() {
             
             // Start sentinel services
             let app_handle = app.handle().clone();
+            let app_dir_for_db = app_dir.clone();
             tauri::async_runtime::spawn(async move {
                 if let Err(e) = sentinel::start_file_watcher(app_handle.clone()).await {
                     eprintln!("File watcher error: {}", e);
@@ -59,10 +68,10 @@ pub fn run() {
                 if let Err(e) = sentinel::start_process_monitor(app_handle.clone()).await {
                     eprintln!("Process monitor error: {}", e);
                 }
-                // Note: We need to get the database from the app state since we can't capture it directly
-                // For now, we'll create a new database connection - this should be optimized in production
-                let db = Arc::new(Database::new("ghost_layer.db").expect("Failed to initialize database"));
-                if let Err(e) = engines::start_rce_detection_with_db(app_handle.clone(), db).await {
+                // Use proper database path from app directory
+                let db_path = app_dir_for_db.join("ghost_layer.db");
+                let db = Arc::new(Database::new(db_path.to_str().unwrap()).expect("Failed to initialize database"));
+                if let Err(e) = engines::rce_detector::start_rce_detection_with_db(app_handle.clone(), db).await {
                     eprintln!("RCE detection error: {}", e);
                 }
             });
@@ -83,6 +92,10 @@ pub fn run() {
             commands::add_trusted_folder,
             commands::get_trusted_folders,
             commands::remove_trusted_folder,
+            commands::migrate_process_to_sandbox,
+            commands::get_sandbox_status,
+            commands::update_process_risk_score,
+            commands::handle_threat_decision,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

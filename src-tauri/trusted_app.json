@@ -83,6 +83,20 @@
       "path": "Chrome.exe.exe",
       "description": "User-added trusted application: Chrome.exe",
       "app_type": "Application"
+    },
+    {
+      "name": " powershell.exe",
+      "hash": "PLACEHOLDER__POWERSHELL_EXE",
+      "path": " powershell.exe.exe",
+      "description": "User-added trusted application:  powershell.exe",
+      "app_type": "Application"
+    },
+    {
+      "name": " cmd.exe",
+      "hash": "PLACEHOLDER__CMD_EXE",
+      "path": " cmd.exe.exe",
+      "description": "User-added trusted application:  cmd.exe",
+      "app_type": "Application"
     }
   ],
   "trusted_folders": [

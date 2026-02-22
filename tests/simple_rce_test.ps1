@@ -1,32 +1,36 @@
-# Simple RCE Detection Test
-Write-Host "=== Ghost Layer RCE Test ===" -ForegroundColor Green
+# Simple RCE Test - Working Version
+Write-Host "=== Simple RCE Test ===" -ForegroundColor Green
 
-# Test 1: Chrome spawning cmd.exe
-Write-Host "Test 1: Chrome -> cmd.exe" -ForegroundColor Yellow
-$chrome = Start-Process -FilePath "cmd.exe" -ArgumentList "/c echo Fake Chrome && timeout /t 5 >nul" -PassThru -WindowStyle Hidden
-Write-Host "Chrome PID: $($chrome.Id)" -ForegroundColor Cyan
+# Test 1: Browser simulation spawning cmd
+Write-Host "Test 1: Browser simulation spawning cmd.exe" -ForegroundColor Yellow
 
-Start-Sleep -Seconds 1
-$cmd1 = Start-Process -FilePath "cmd.exe" -ArgumentList "/c echo Malicious cmd && timeout /t 3 >nul" -PassThru
-Write-Host "Malicious cmd PID: $($cmd1.Id)" -ForegroundColor Red
+# Create fake browser process
+$fakeBrowser = Start-Process powershell -ArgumentList "-Command Write-Host 'Fake Browser'; Start-Sleep 15" -PassThru
+Write-Host "Fake browser PID: $($fakeBrowser.Id)" -ForegroundColor Cyan
 
-# Test 2: Word spawning powershell.exe  
-Write-Host "Test 2: Word -> powershell.exe" -ForegroundColor Yellow
-$word = Start-Process -FilePath "cmd.exe" -ArgumentList "/c echo Fake Word && timeout /t 5 >nul" -PassThru -WindowStyle Hidden
-Write-Host "Word PID: $($word.Id)" -ForegroundColor Cyan
+Start-Sleep -Seconds 2
 
-Start-Sleep -Seconds 1
-$ps1 = Start-Process -FilePath "powershell.exe" -ArgumentList "-Command Write-Host Malicious PS; Start-Sleep 3" -PassThru
-Write-Host "Malicious PS PID: $($ps1.Id)" -ForegroundColor Red
+# Spawn cmd.exe from fake browser
+$cmdFromBrowser = Start-Process cmd -ArgumentList "/c echo Malicious cmd from fake browser && timeout /t 10" -PassThru
+Write-Host "cmd.exe PID: $($cmdFromBrowser.Id)" -ForegroundColor Red
+Write-Host "This should trigger RCE detection!" -ForegroundColor Red
 
-# Test 3: Normal process
-Write-Host "Test 3: Normal notepad.exe" -ForegroundColor Green
-$notepad = Start-Process -FilePath "notepad.exe" -PassThru
-Write-Host "Notepad PID: $($notepad.Id)" -ForegroundColor Green
+# Test 2: Suspicious parent spawning PowerShell
+Write-Host "`nTest 2: Suspicious parent spawning PowerShell" -ForegroundColor Yellow
 
-Write-Host "=== Test Complete ===" -ForegroundColor Green
-Write-Host "Check Ghost Layer dashboard for alerts!" -ForegroundColor Cyan
+$suspiciousParent = Start-Process powershell -ArgumentList "-Command Write-Host 'Suspicious Parent'; Start-Sleep 12" -PassThru
+Write-Host "Suspicious parent PID: $($suspiciousParent.Id)" -ForegroundColor Cyan
+
+Start-Sleep -Seconds 2
+
+$shellFromSuspicious = Start-Process powershell -ArgumentList "-Command Write-Host 'Malicious shell from suspicious parent'; Start-Sleep 8" -PassThru
+Write-Host "PowerShell PID: $($shellFromSuspicious.Id)" -ForegroundColor Red
+Write-Host "This should trigger RCE detection!" -ForegroundColor Red
+
+Write-Host "`nTest complete! Check Ghost Layer dashboard for RCE alerts." -ForegroundColor Green
+Write-Host "Expected: 2 CRITICAL RCE alerts" -ForegroundColor Yellow
+
+Start-Sleep -Seconds 8
 
 # Cleanup
-Start-Sleep -Seconds 10
-Get-Process | Where-Object { $_.ProcessName -in @("cmd", "notepad", "powershell") } | Stop-Process -Force -ErrorAction SilentlyContinue
+Get-Process | Where-Object { $_.ProcessName -like "*powershell*" } | Stop-Process -Force -ErrorAction SilentlyContinue

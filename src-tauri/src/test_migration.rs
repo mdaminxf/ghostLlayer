@@ -23,14 +23,14 @@ mod tests {
         let mut mutable_manager = manager;
         let result = mutable_manager.add_trusted_folder("C:\\temp\\test_trusted_folder".to_string());
         match result {
-            Ok(_) => println!("✓ Successfully added trusted folder"),
+            Ok(_) => println!("Successfully added trusted folder"),
             Err(e) => println!("Folder add error: {}", e),
         }
         
         // Save and check if trusted_folders appears in JSON
         let save_result = mutable_manager.save_config(config_path);
         match save_result {
-            Ok(_) => println!("✓ Successfully saved config"),
+            Ok(_) => println!("Successfully saved config"),
             Err(e) => println!("Save error: {}", e),
         }
         

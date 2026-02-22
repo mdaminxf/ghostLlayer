@@ -115,24 +115,120 @@ pub async fn start_process_monitor(app_handle: AppHandle) -> Result<(), Box<dyn 
                     continue;
                 }
                 
-                // Whitelist legitimate Windows processes
-                let whitelist = ["msfeedssync.exe", "svchost.exe", "explorer.exe", "system"];
+                // Enhanced whitelist for legitimate Windows processes
+                let whitelist = [
+                    "msfeedssync.exe", "svchost.exe", "explorer.exe", "system", 
+                    "powershell.exe", "cmd.exe", "conhost.exe", "winlogon.exe",
+                    "services.exe", "csrss.exe", "smss.exe", "wininit.exe",
+                    "spoolsv.exe", "lsass.exe", "taskmgr.exe", "regedit.exe",
+                    "runtimebroker.exe", "sihost.exe", "dwm.exe", "audiodg.exe",
+                    "windefend.exe", "msmpeng.exe", "securityhealthsystray.exe",
+                    "chrome.exe", "firefox.exe", "msedge.exe", "brave.exe",
+                    "winword.exe", "excel.exe", "powerpnt.exe", "acrobat.exe",
+                    "notepad.exe", "wordpad.exe", "dllhost.exe"
+                ];
+                
                 if whitelist.iter().any(|&safe| name.contains(safe)) {
                     known_processes.insert(pid_u32, name);
                     continue;
                 }
                 
-                // Detect suspicious process names
-                let suspicious_keywords = ["mimikatz", "psexec", "netcat", "nc.exe", "meterpreter"];
-                if suspicious_keywords.iter().any(|&kw| name.contains(kw)) {
+                // Enhanced suspicious process detection
+                let suspicious_keywords = [
+                    "mimikatz", "psexec", "netcat", "nc.exe", "meterpreter", 
+                    "cobaltstrike", "beacon", "empire", "poshc2", "koadic",
+                    "metasploit", "burp", "wireshark", "tcpdump", "nmap",
+                    "hashcat", "john", "hydra", "sqlmap", "nikto", "dirb",
+                    "gobuster", "wfuzz", "ffuf", "sublist3r", "amass",
+                    "malware", "virus", "trojan", "backdoor", "rootkit", 
+                    "keylog", "keylogger", "bot", "miner", "crypt",
+                    "encrypt", "ransom", "lock", "decode", "inject",
+                    "hack", "crack", "exploit", "payload", "dropper", "loader"
+                ];
+                
+                let mut is_suspicious = false;
+                let mut threat_type = "Suspicious Process";
+                let mut severity = "MEDIUM";
+                
+                for keyword in &suspicious_keywords {
+                    if name.contains(keyword) {
+                        is_suspicious = true;
+                        
+                        // Categorize threat level based on keyword
+                        match keyword {
+                            &"mimikatz" | &"psexec" | &"meterpreter" | &"cobaltstrike" | &"beacon" => {
+                                threat_type = "Credential Theft Tool";
+                                severity = "CRITICAL";
+                            },
+                            &"malware" | &"virus" | &"trojan" | &"backdoor" | &"rootkit" => {
+                                threat_type = "Malware Detected";
+                                severity = "CRITICAL";
+                            },
+                            &"ransom" | &"crypt" | &"encrypt" | &"lock" => {
+                                threat_type = "Ransomware Tool";
+                                severity = "CRITICAL";
+                            },
+                            &"keylog" | &"keylogger" => {
+                                threat_type = "Keylogger Detected";
+                                severity = "HIGH";
+                            },
+                            &"bot" | &"miner" => {
+                                threat_type = "Cryptocurrency Miner/Bot";
+                                severity = "HIGH";
+                            },
+                            _ => {
+                                threat_type = "Hacking Tool";
+                                severity = "HIGH";
+                            }
+                        }
+                        break;
+                    }
+                }
+                
+                // Check for suspicious process characteristics
+                if !is_suspicious {
+                    // Processes with random-looking names
+                    if name.len() > 8 && name.chars().all(|c| c.is_alphanumeric() || c == '_') {
+                        let vowels = name.chars().filter(|&c| "aeiou".contains(c)).count();
+                        let consonants = name.chars().filter(|&c| c.is_alphanumeric() && !"aeiou".contains(c)).count();
+                        
+                        // Low vowel ratio suggests random name
+                        if vowels > 0 && (consonants as f64 / vowels as f64) > 3.0 {
+                            is_suspicious = true;
+                            threat_type = "Random Process Name";
+                            severity = "MEDIUM";
+                        }
+                    }
+                    
+                    // Processes in temp directories
+                    if let Some(parent) = process.parent() {
+                        if let Some(parent_proc) = sys.process(parent) {
+                            let parent_name = parent_proc.name().to_string_lossy().to_lowercase();
+                            
+                            // Suspicious parent-child relationships
+                            if (whitelist.iter().any(|&safe| parent_name.contains(safe)) || 
+                                parent_name.contains("explorer") || parent_name.contains("winword") || 
+                                parent_name.contains("excel") || parent_name.contains("acrobat")) &&
+                                (name.contains("powershell") || name.contains("cmd") || name.contains("wscript")) {
+                                
+                                is_suspicious = true;
+                                threat_type = "Suspicious Parent-Child Relationship";
+                                severity = "HIGH";
+                            }
+                        }
+                    }
+                }
+                
+                if is_suspicious {
                     let alert = ThreatAlert {
-                        threat_type: "Suspicious Process".to_string(),
-                        severity: "CRITICAL".to_string(),
+                        threat_type: threat_type.to_string(),
+                        severity: severity.to_string(),
                         target: format!("{} (PID: {})", process.name().to_string_lossy(), pid),
                         timestamp: chrono::Utc::now().to_rfc3339(),
                         entropy: None,
                         explanation: format!(
-                            "Detected suspicious process: {}. This may be a hacking tool.",
+                            "Detected {}: {}. This may indicate malicious activity.",
+                            threat_type.to_lowercase(),
                             process.name().to_string_lossy()
                         ),
                     };

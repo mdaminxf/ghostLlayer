@@ -1,5 +1,5 @@
-# RCE Detection Test Simulator
-# This script simulates the RCE attack pattern to test if Ghost Layer detects it
+# RCE Detection Test Simulator - Fixed Version
+# This script simulates RCE attack patterns to test if Ghost Layer detects it
 
 Write-Host "=== Ghost Layer RCE Detection Test Suite ===" -ForegroundColor Green
 Write-Host ""
@@ -12,7 +12,7 @@ Write-Host "This should trigger RCE detection..."
 $chromeProcess = Start-Process -FilePath "cmd.exe" -ArgumentList "/c title FakeChromeProcess && echo Simulated Chrome process && timeout /t 5 > nul" -PassThru -WindowStyle Hidden
 Write-Host "Fake Chrome PID: $($chromeProcess.Id)" -ForegroundColor Cyan
 
-# Wait a moment, then simulate the RCE attack by starting cmd.exe as a child
+# Wait a moment, then simulate RCE attack by starting cmd.exe as a child
 Start-Sleep -Seconds 1
 
 # Use WMI to create a more realistic parent-child relationship
@@ -59,7 +59,8 @@ Write-Host ""
 Write-Host "Test 5: Realistic browser simulation (should trigger RCE)" -ForegroundColor Yellow
 
 # Start a process that simulates a browser more closely
-$browserSim = Start-Process -FilePath "powershell.exe" -ArgumentList "-Command `$ps = Start-Process cmd.exe -ArgumentList '/c echo Browser simulation && timeout /t 4 > nul' -PassThru; Write-Host Browser PID: `$($ps.Id); Start-Sleep 5" -PassThru
+$browserCommand = "powershell.exe -Command `$ps = Start-Process cmd.exe -ArgumentList '/c echo Browser simulation && timeout /t 4 > nul' -PassThru; Write-Host Browser PID: `$($ps.Id); Start-Sleep 5"
+$browserSim = Start-Process -FilePath "powershell.exe" -ArgumentList "-Command $browserCommand" -PassThru
 Write-Host "Browser simulator PID: $($browserSim.Id)" -ForegroundColor Cyan
 
 Start-Sleep -Seconds 2
