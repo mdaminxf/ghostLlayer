@@ -161,29 +161,6 @@ impl ProcessSentinel {
         Ok(())
     }
 
-    // Process security event through behavioral analysis
-    pub fn process_security_event(&self, event: SecurityEvent) -> Result<()> {
-        match event.hook_type {
-            HookType::ProcessSpawn => {
-                println!("Process spawn detected: {} -> {}", event.process_id, event.target);
-            },
-            HookType::FileWrite => {
-                println!("File write detected: {} -> {}", event.process_id, event.target);
-            },
-            HookType::NetworkConnect => {
-                println!("Network connection detected: {} -> {}", event.process_id, event.target);
-            },
-            HookType::ClipboardRead => {
-                println!("Clipboard access detected: {} -> {}", event.process_id, event.target);
-            },
-            HookType::MemoryAccess => {
-                println!("Memory access detected: {} -> {}", event.process_id, event.target);
-            }
-        }
-        
-        Ok(())
-    }
-
     // Sanbox Migration Functions
     
     // Migrate process to restricted sandbox instead of killing
