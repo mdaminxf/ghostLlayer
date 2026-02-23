@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
+import { URLRiskScorer, URLRiskResult } from '../url-risk-scorer';
 
 interface EventLog {
   id?: number;
@@ -49,6 +50,13 @@ function Dashboard() {
   // Threat confirmation dialog state
   const [showThreatConfirmation, setShowThreatConfirmation] = useState(false);
   const [currentThreat, setCurrentThreat] = useState<any>(null);
+
+  // URL Risk Scoring state
+  const [urlScorer] = useState(() => new URLRiskScorer());
+  const [urlInput, setUrlInput] = useState('');
+  const [urlResult, setUrlResult] = useState<URLRiskResult | null>(null);
+  const [showUrlModal, setShowUrlModal] = useState(false);
+  const [urlHistory, setUrlHistory] = useState<Array<{url: string, result: URLRiskResult, timestamp: string}>>([]);
 
   useEffect(() => {
     loadLogs();
@@ -258,6 +266,117 @@ function Dashboard() {
     return <span className="bg-blue-600 text-white text-xs px-2 py-1 rounded-full font-semibold">THREAT</span>;
   };
 
+  const scoreUrl = () => {
+    if (!urlInput.trim()) return;
+    
+    const result = urlScorer.scoreURL(urlInput);
+    setUrlResult(result);
+    
+    // Add to history
+    const historyEntry = {
+      url: urlInput,
+      result: result,
+      timestamp: new Date().toLocaleString()
+    };
+    setUrlHistory(prev => [historyEntry, ...prev.slice(0, 9)]); // Keep last 10 entries
+    
+    // Show modal if blocked or warned
+    if (result.verdict === 'BLOCK' || result.verdict === 'WARN') {
+      setShowUrlModal(true);
+    }
+  };
+
+  const handleUrlUnblock = () => {
+    if (urlResult && urlInput) {
+      urlScorer.unblockURL(urlInput);
+      
+      // Re-score the URL (should now be ALLOW)
+      const newResult = urlScorer.scoreURL(urlInput);
+      setUrlResult(newResult);
+      
+      // Update history
+      setUrlHistory(prev => prev.map(entry => 
+        entry.url === urlInput 
+          ? { ...entry, result: newResult }
+          : entry
+      ));
+      
+      setShowUrlModal(false);
+    }
+  };
+
+  const getUrlVerdictColor = (verdict: string) => {
+    switch (verdict) {
+      case 'ALLOW': return 'text-green-400';
+      case 'WARN': return 'text-yellow-400';
+      case 'BLOCK': return 'text-red-400';
+      default: return 'text-gray-400';
+    }
+  };
+
+
+  const getUrlScoreColor = (score: number) => {
+    if (score >= 50) return 'text-red-400';
+    if (score >= 20) return 'text-yellow-400';
+    return 'text-green-400';
+  };
+
+  const testURLScorer = (url: string) => {
+    console.log(' Testing URL:', url);
+    const result = urlScorer.scoreURL(url);
+    console.log(' Result:', result);
+    
+    // Add to history
+    const historyEntry = {
+      url: url,
+      result: result,
+      timestamp: new Date().toLocaleString()
+    };
+    setUrlHistory(prev => [historyEntry, ...prev.slice(0, 9)]);
+    setUrlResult(result);
+    
+    return result;
+  };
+
+  (window as any).testURLScorer = testURLScorer;
+  (window as any).unblockURL = (url: string) => {
+    console.log('🔄 Unblocking URL:', url);
+    urlScorer.unblockURL(url);
+    const newResult = urlScorer.scoreURL(url);
+    console.log('✅ After unblock:', newResult);
+    setUrlResult(newResult);
+    setUrlHistory(prev => prev.map(entry => 
+      entry.url === url 
+        ? { ...entry, result: newResult }
+        : entry
+    ));
+  };
+
+  useEffect(() => {
+    console.log('🚀 URL Risk Scorer loaded!');
+    console.log('💻 Available console commands:');
+    console.log('  testURLScorer("https://example.com") - Test any URL');
+    console.log('  unblockURL("https://example.com") - Unblock and trust URL');
+    console.log('');
+    console.log('🧪 Running quick tests...');
+    
+    const testUrls = [
+      'https://google.com',
+      'https://suspicious.xyz', 
+      'https://example.com@malicious.com',
+      'https://example.com/program.exe',
+      'http://192.168.1.1',
+      'https://paypal-secure.com'
+    ];
+    
+    testUrls.forEach((url, index) => {
+      setTimeout(() => {
+        const result = testURLScorer(url);
+        console.log(`${index + 1}. ${url} → ${result.verdict} (${result.score}pts)`);
+      }, index * 200);
+    });
+  }, []);
+
   return (
     <div className="min-h-screen bg-gray-900 text-gray-100 p-6">
       <header className="mb-8">
@@ -445,6 +564,130 @@ function Dashboard() {
                 </div>
               ))
             )}
+          </div>
+        </div>
+      </div>
+
+      {/* URL Risk Scoring Section */}
+      <div className="mt-8 bg-gray-800 rounded-lg p-6 border border-gray-700">
+        <h2 className="text-2xl font-bold mb-6 flex items-center gap-2">
+          🔍 URL Risk Scoring Algorithm
+        </h2>
+        
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* URL Input Section */}
+          <div className="lg:col-span-1">
+            <h3 className="text-lg font-semibold mb-4 text-blue-400">Link Analysis</h3>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-2">
+                  Enter URL to analyze:
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    placeholder="https://example.com"
+                    value={urlInput}
+                    onChange={(e) => setUrlInput(e.target.value)}
+                    className="flex-1 bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white"
+                    onKeyPress={(e) => e.key === 'Enter' && scoreUrl()}
+                  />
+                  <button
+                    onClick={scoreUrl}
+                    className="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded font-medium transition-colors"
+                  >
+                    Analyze
+                  </button>
+                </div>
+              </div>
+              
+              {urlResult && (
+                <div className="bg-gray-700 rounded p-4 border border-gray-600">
+                  <h4 className="font-semibold mb-3">Analysis Results:</h4>
+                  <div className="space-y-2">
+                    <div className="flex justify-between items-center">
+                      <span className="text-gray-300">Verdict:</span>
+                      <span className={`font-bold ${getUrlVerdictColor(urlResult.verdict)}`}>
+                        {urlResult.verdict}
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-gray-300">Risk Score:</span>
+                      <span className={`font-bold ${getUrlScoreColor(urlResult.score)}`}>
+                        {urlResult.score}
+                      </span>
+                    </div>
+                  </div>
+                  
+                  {urlResult.reasons.length > 0 && (
+                    <div className="mt-3">
+                      <div className="text-sm font-semibold text-gray-300 mb-2">Risk Factors:</div>
+                      <div className="space-y-1">
+                        {urlResult.reasons.map((reason, index) => (
+                          <div key={index} className="text-xs text-gray-400 flex items-center gap-2">
+                            <span className="w-2 h-2 bg-yellow-400 rounded-full"></span>
+                            {reason}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Recent Analysis */}
+          <div className="lg:col-span-1">
+            <h3 className="text-lg font-semibold mb-4 text-green-400">Recent Analysis</h3>
+            <div className="space-y-3">
+              <div className="bg-gray-700 rounded p-3 border border-gray-600">
+                <div className="text-sm font-semibold text-gray-300 mb-2">Recent Analysis:</div>
+                <div className="space-y-2 max-h-48 overflow-y-auto">
+                  {urlHistory.length === 0 ? (
+                    <div className="text-xs text-gray-500 text-center py-2">
+                      No URLs analyzed yet
+                    </div>
+                  ) : (
+                    urlHistory.map((entry, index) => (
+                      <div key={index} className="bg-gray-800 rounded p-2 border border-gray-600">
+                        <div className="flex justify-between items-start mb-1">
+                          <div className="text-xs font-mono text-blue-300 truncate flex-1">
+                            {entry.url}
+                          </div>
+                          <span className={`text-xs font-bold ${getUrlVerdictColor(entry.result.verdict)} ml-2`}>
+                            {entry.result.verdict}
+                          </span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-xs text-gray-500">
+                            {entry.timestamp}
+                          </span>
+                          <span className={`text-xs font-bold ${getUrlScoreColor(entry.result.score)}`}>
+                            {entry.result.score}pts
+                          </span>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+              
+              {urlResult && urlResult.verdict !== 'ALLOW' && (
+                <div className="bg-gray-700 rounded p-3 border border-gray-600">
+                  <div className="text-sm font-semibold text-gray-300 mb-2">User Feedback:</div>
+                  <button
+                    onClick={handleUrlUnblock}
+                    className="w-full bg-green-600 hover:bg-green-700 px-3 py-2 rounded text-sm font-medium transition-colors"
+                  >
+                    🔄 Unblock & Trust URL
+                  </button>
+                  <div className="text-xs text-gray-400 mt-2">
+                    Adds URL to personal trusted list
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -637,6 +880,101 @@ function Dashboard() {
                 className="bg-red-600 hover:bg-red-700 px-6 py-3 rounded text-white font-medium transition-colors flex items-center gap-2"
               >
                 🗑️ Remove Threat
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* URL Risk Scoring Modal */}
+      {showUrlModal && urlResult && (
+        <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
+          <div className={`${urlResult.verdict === 'BLOCK' ? 'bg-red-900 border-red-500' : 'bg-yellow-900 border-yellow-500'} border-2 rounded-lg p-6 max-w-lg mx-4 shadow-2xl`}>
+            <div className="flex items-center gap-3 mb-4">
+              <div className={`w-12 h-12 ${urlResult.verdict === 'BLOCK' ? 'bg-red-500' : 'bg-yellow-500'} rounded-full flex items-center justify-center`}>
+                {urlResult.verdict === 'BLOCK' ? (
+                  <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                  </svg>
+                ) : (
+                  <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                  </svg>
+                )}
+              </div>
+              <div>
+                <h3 className={`text-2xl font-bold text-white`}>
+                  {urlResult.verdict === 'BLOCK' ? '🚫 URL BLOCKED!' : '⚠️ URL WARNING!'}
+                </h3>
+                <p className={`${urlResult.verdict === 'BLOCK' ? 'text-red-200' : 'text-yellow-200'} text-sm`}>
+                  {urlResult.verdict === 'BLOCK' ? 'Dangerous URL detected - Access denied' : 'Suspicious URL detected - Proceed with caution'}
+                </p>
+              </div>
+            </div>
+            
+            <div className="bg-black bg-opacity-50 rounded p-4 mb-4">
+              <div className="text-sm text-gray-200 mb-2">
+                <span className="font-semibold text-white">URL:</span> {urlInput}
+              </div>
+              <div className="text-sm text-gray-200 mb-2">
+                <span className="font-semibold text-white">Risk Score:</span> 
+                <span className={`ml-2 font-bold ${urlResult.verdict === 'BLOCK' ? 'text-red-400' : 'text-yellow-400'}`}>
+                  {urlResult.score} points
+                </span>
+              </div>
+              <div className="text-sm text-gray-200">
+                <span className="font-semibold text-white">Verdict:</span> 
+                <span className={`ml-2 font-bold ${urlResult.verdict === 'BLOCK' ? 'text-red-400' : 'text-yellow-400'}`}>
+                  {urlResult.verdict}
+                </span>
+              </div>
+            </div>
+            
+            {urlResult.reasons.length > 0 && (
+              <div className={`${urlResult.verdict === 'BLOCK' ? 'bg-red-800' : 'bg-yellow-800'} bg-opacity-50 border ${urlResult.verdict === 'BLOCK' ? 'border-red-600' : 'border-yellow-600'} rounded p-3 mb-4`}>
+                <h4 className={`font-semibold ${urlResult.verdict === 'BLOCK' ? 'text-red-300' : 'text-yellow-300'} mb-2`}>Risk Factors Detected:</h4>
+                <div className="space-y-1">
+                  {urlResult.reasons.map((reason, index) => (
+                    <div key={index} className={`text-sm ${urlResult.verdict === 'BLOCK' ? 'text-red-200' : 'text-yellow-200'} flex items-center gap-2`}>
+                      <span className="w-2 h-2 bg-red-400 rounded-full"></span>
+                      {reason}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            
+            <div className={`${urlResult.verdict === 'BLOCK' ? 'bg-red-800' : 'bg-yellow-800'} bg-opacity-30 border ${urlResult.verdict === 'BLOCK' ? 'border-red-600' : 'border-yellow-600'} rounded p-3 mb-4`}>
+              <p className={`${urlResult.verdict === 'BLOCK' ? 'text-red-200' : 'text-yellow-200'} text-sm`}>
+                <strong>{urlResult.verdict === 'BLOCK' ? 'DANGER:' : 'CAUTION:'}</strong> 
+                {urlResult.verdict === 'BLOCK' 
+                  ? ' This URL has been identified as dangerous and access has been blocked to protect your security.'
+                  : ' This URL exhibits suspicious characteristics. Proceed with extreme caution.'
+                }
+              </p>
+            </div>
+            
+            <div className="flex gap-3">
+              {urlResult.verdict === 'BLOCK' ? (
+                <button
+                  onClick={handleUrlUnblock}
+                  className="flex-1 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded font-medium transition-colors"
+                >
+                  🔄 Unblock & Trust URL
+                </button>
+              ) : (
+                <button
+                  onClick={handleUrlUnblock}
+                  className="flex-1 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded font-medium transition-colors"
+                >
+                  ✓ Accept Risk & Continue
+                </button>
+              )}
+              <button
+                onClick={() => setShowUrlModal(false)}
+                className="flex-1 bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded font-medium transition-colors"
+              >
+                Cancel
               </button>
             </div>
           </div>
