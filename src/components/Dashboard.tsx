@@ -314,14 +314,6 @@ function Dashboard() {
     }
   };
 
-  const getUrlVerdictBg = (verdict: string) => {
-    switch (verdict) {
-      case 'ALLOW': return 'bg-green-600';
-      case 'WARN': return 'bg-yellow-600';
-      case 'BLOCK': return 'bg-red-600';
-      default: return 'bg-gray-600';
-    }
-  };
 
   const getUrlScoreColor = (score: number) => {
     if (score >= 50) return 'text-red-400';
